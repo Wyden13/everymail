@@ -22,6 +22,9 @@ jobs:
       - name: Tauri system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev
       - run: bun install --frozen-lockfile
+      - name: Protobuf breaking changes
+        if: github.event_name == 'pull_request'
+        run: bunx buf breaking proto --against "https://github.com/${{ github.repository }}.git#branch=${{ github.base_ref }},subdir=proto"
       - run: bun run gen
       - run: bun run wasm
       - run: bun run check
