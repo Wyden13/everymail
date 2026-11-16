@@ -20,7 +20,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [ ] Postgres from the distribution's packages on the GCE VM with the tuned config
 - [ ] Measure Postgres idle memory on the VM (anonymous plus shared memory of all its processes, not page cache)
       Gate: under 100 MB keeps Postgres; over it switches to Turso before the first table exists
-- [ ] Plain hand-written `.sql` migrations for Postgres, applied in order at startup and recorded in one table
+- [x] Plain hand-written `.sql` migrations for Postgres, applied in order at startup and recorded in one table
 - [ ] Sign-in with Google or Microsoft through OIDC (authorize URL, callback, ID token check); the EveryAI account is added later as another provider of the same flow
 - [ ] User and session tables, with `AuthService` in `api.v1`
 - [ ] The session is a bearer credential for native clients and an HttpOnly, Secure, SameSite cookie for web, same origin as the Backend; both resolve to the same session row
