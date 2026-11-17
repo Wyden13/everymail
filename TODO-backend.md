@@ -21,10 +21,10 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [ ] Measure Postgres idle memory on the VM (anonymous plus shared memory of all its processes, not page cache)
       Gate: under 100 MB keeps Postgres; over it switches to Turso before the first table exists
 - [x] Plain hand-written `.sql` migrations for Postgres, applied in order at startup and recorded in one table
-- [ ] Sign-in with Google or Microsoft through OIDC (authorize URL, callback, ID token check); the EveryAI account is added later as another provider of the same flow
-- [ ] User and session tables, with `AuthService` in `api.v1`
-- [ ] The session is a bearer credential for native clients and an HttpOnly, Secure, SameSite cookie for web, same origin as the Backend; both resolve to the same session row
-- [ ] The RPC table marks each method as authenticated or public; handlers receive an authenticated user or never run
+- [x] Sign-in with Google or Microsoft through OIDC (authorize URL, callback, ID token check); the EveryAI account is added later as another provider of the same flow
+- [x] User and session tables, with `AuthService` in `api.v1`
+- [x] The session is a bearer credential for native clients and an HttpOnly, Secure, SameSite cookie for web, same origin as the Backend; both resolve to the same session row
+- [x] The RPC table marks each method as authenticated or public; handlers receive an authenticated user or never run
 
 ## Jobs, time and side effects
 

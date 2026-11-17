@@ -6,14 +6,16 @@ const RENEW_SECONDS = 86_400;
 
 export type Session = { userId: string; tokenHash: Uint8Array };
 
+/** 32 random bytes as base64url: session credentials and the sign-in secrets. */
+export const randomToken = () =>
+	Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+
 export const hashToken = (token: string) =>
 	new Bun.CryptoHasher("sha256").update(token).digest();
 
 /** Starts a session and returns its credential. Also drops the user's expired sessions. */
 export async function createSession(sql: SQL, userId: string): Promise<string> {
-	const token = Buffer.from(
-		crypto.getRandomValues(new Uint8Array(32)),
-	).toString("base64url");
+	const token = randomToken();
 	await sql`
 		WITH expired AS (
 			DELETE FROM sessions WHERE user_id = ${userId} AND expires_at <= now()

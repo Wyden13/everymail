@@ -132,6 +132,12 @@ The user can write to an agent and get an answer, for a question about their mai
 
 - Users sign in with Google or Microsoft. An EveryAI account is added later
 - Sign-in is separate from connecting mail accounts, though the first sign-in can connect that provider's mailbox in the same step
+- OIDC authorization code flow with PKCE and a nonce. The provider redirects to the Backend's `GET /auth/callback`, the one redirect URI for every client, and the Backend exchanges the code and checks the ID token itself, so the engine runs no local server and needs no deep link
+- `StartSignIn` records an attempt that lives 600 seconds and returns the provider page plus a claim. The `state` sent to the provider passes through the browser, so it is never the secret that collects the session
+- Web: the callback sets the session cookie and redirects to the app. Native: the callback page says to return to the app, and the engine collects the session with `FinishSignIn` and its claim, once
+- A user is the provider plus its `sub` claim. The email is for display only, so the same person through Google and through Microsoft is two users
+- The session is an opaque random token; only its SHA-256 is stored. It lives 30 days from its last use, renewed at most once a day. Native clients send it as a bearer token; web gets it as the `__Host-session` cookie (HttpOnly, Secure, SameSite=Strict), and both resolve to the same row
+- Cross-site requests cannot ride on the cookie: every call is a POST with `Content-Type: application/proto`, which needs a CORS preflight the Backend never grants, and the cookie is SameSite=Strict
 
 ## Schema
 
@@ -203,6 +209,7 @@ Everything the app does with judgement is done by an agent the user can see. Not
 - TLS ends at the reverse proxy that already serves the EveryAI services. It must not buffer the sync stream
 - The domain is mail.everyai.dev, shared by the landing page, the web app and the Backend's calls
 - The key that encrypts provider tokens and LLM keys is a file on the VM, outside Postgres, readable only by the account the Backend service runs as
+- The Google and Microsoft sign-in client ids and secrets come from the service's environment, with `PUBLIC_ORIGIN`; the Backend refuses to start without them. The redirect URI registered with both is `https://mail.everyai.dev/auth/callback`
 - No backups at first. Mail can be synced again from the providers; agents, notes, rules and run logs would be lost with the VM. This is acceptable only before real users and is revisited then
 - Logs go to the system journal and carry ids, kinds and durations only: never mail content, prompts or tokens
 - A watchdog job checks queue depth, the oldest ready job and failure rates, and notifies the owner when a threshold is crossed. No external monitoring service

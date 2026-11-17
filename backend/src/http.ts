@@ -1,4 +1,12 @@
-import type { Call, CookieChange, Reply, Rpc, RpcTable } from "./rpc";
+import type {
+	Call,
+	CookieChange,
+	Page,
+	Pages,
+	Reply,
+	Rpc,
+	RpcTable,
+} from "./rpc";
 import type { Session } from "./session";
 
 const PROTO = "application/proto";
@@ -37,9 +45,36 @@ async function authorize(
 	};
 }
 
-export function handleRequest(table: RpcTable, resolve: Resolve) {
+/** The callback URL carries the sign-in code: nothing may cache it or pass it on as a referrer. */
+function render(page: Page): Response {
+	const headers = new Headers({
+		"Cache-Control": "no-store",
+		"Referrer-Policy": "no-referrer",
+	});
+	if (page.kind === "text") {
+		headers.set("Content-Type", "text/plain; charset=utf-8");
+		return new Response(page.text, { status: page.status, headers });
+	}
+	headers.set("Location", page.to);
+	if (page.cookie) headers.set("Set-Cookie", cookieHeader(page.cookie));
+	return new Response(null, { status: 303, headers });
+}
+
+export function handleRequest(table: RpcTable, pages: Pages, resolve: Resolve) {
 	return async (req: Request): Promise<Response> => {
-		const rpc = table.get(new URL(req.url).pathname);
+		const url = new URL(req.url);
+		const page = pages.get(url.pathname);
+		if (page) {
+			if (req.method !== "GET") return status(405, { Allow: "GET" });
+			try {
+				return render(await page(url.searchParams));
+			} catch (error) {
+				console.error(error);
+				return status(500);
+			}
+		}
+
+		const rpc = table.get(url.pathname);
 		if (!rpc) return status(404);
 		if (req.method !== "POST") return status(405, { Allow: "POST" });
 		if (req.headers.get("content-type") !== PROTO) return status(415);
@@ -71,6 +106,11 @@ export function handleRequest(table: RpcTable, resolve: Resolve) {
 	};
 }
 
-export function serve(table: RpcTable, resolve: Resolve, port: number) {
-	return Bun.serve({ port, fetch: handleRequest(table, resolve) });
+export function serve(
+	table: RpcTable,
+	pages: Pages,
+	resolve: Resolve,
+	port: number,
+) {
+	return Bun.serve({ port, fetch: handleRequest(table, pages, resolve) });
 }
