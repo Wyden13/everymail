@@ -37,11 +37,13 @@ Everything the Backend does on its own is a job: fetching mail, sending mail, sn
 ## Jobs
 
 - One jobs table in Postgres is the queue. All state lives in Postgres: an executor can die at any point and lose nothing
-- A job's status is an explicit enum: scheduled, ready, running (under a lease), waiting for approval, waiting for an event, paused, succeeded, failed, cancelled. A lease that expires returns the job to ready
+- A job's status is an explicit enum: scheduled, ready, running (under a lease), waiting for approval, waiting for an event, paused, succeeded, failed, cancelled. Succeeded, failed and cancelled are not stored: reaching one deletes the row
+- Scheduled and ready are both claimed once due. Scheduled is the one that can be edited or cancelled (a send, a snooze, a retry after backoff); ready runs as soon as its lane has room (a lease ran out, a resume, an awaited event arrived)
+- The lease is the lane's timeout. A lease that runs out is a failed attempt: the job returns to ready, or fails when its attempts are used up. A finish is recorded only while its own attempt still holds the job, so a late one changes nothing
 - Waiting for an event covers a tool result, a provider batch result and another agent finishing
 - Executors claim jobs in batches and never poll when idle: enqueueing signals the executor in process, and a timer sleeps until the next due time. `Bun.sql` cannot receive `LISTEN/NOTIFY`, so that is added only when the executor becomes a separate process
 - No transaction and no executor is held open across an external call: claim and commit, call, then record and commit
-- One mechanism, several lanes. Each job kind has its own concurrency cap, priority, retry policy and timeout, so slow agent steps never delay a send
+- One mechanism, several lanes. Each job kind is a lane with its own concurrency cap, retry policy and timeout, so slow agent steps never delay a send. Within a lane, jobs are claimed by due time. Priority between lanes comes with the per-user cap, the first limit lanes share
 - Columns hold what the claim query needs; the rest of the payload is protobuf
 - A finished job is deleted; the run log is what is kept. The run log covers agent runs. A job of another kind that keeps failing shows on the thing it concerns: the account's status or the message's send state
 - The run log is kept 90 days. The transcript, which holds mail content and model output, is deleted after 30 days; a parked run keeps its transcript until it resolves

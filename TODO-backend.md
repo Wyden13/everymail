@@ -13,7 +13,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [x] buf and protobuf-es codegen with generated code not committed, Biome, one CI workflow
 - [x] Unknown path, wrong method, wrong content type and undecodable body each map to one explicit status, with tests of the HTTP adapter
 - [x] CI runs `buf lint` for `api.v1` and `ui.v1`
-- [ ] CI runs `buf breaking` against the main branch
+- [x] CI runs `buf breaking` against the main branch
 
 ## Foundations
 
@@ -28,23 +28,23 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 
 ## Jobs, time and side effects
 
-- [ ] Jobs table: user id, kind, status, due time, lease expiry and the other columns the claim query needs; the rest of the payload is a protobuf blob
+- [x] Jobs table: user id, kind, status, due time, lease expiry and the other columns the claim query needs; the rest of the payload is a protobuf blob
       Every row carries a user id
-- [ ] Job status as an explicit enum (scheduled, ready, running, waiting for approval, waiting for an event, paused, succeeded, failed, cancelled) with one pure transition function; tests for every state and event pair
+- [x] Job status as an explicit enum (scheduled, ready, running, waiting for approval, waiting for an event, paused, succeeded, failed, cancelled) with one pure transition function; tests for every state and event pair
       Waiting for an event covers a tool result, a provider batch result and another agent finishing
-- [ ] Batch claim with `FOR UPDATE SKIP LOCKED` moves ready jobs to running under a lease and commits before any external call; test of ordering by priority then due time
+- [x] Batch claim with `FOR UPDATE SKIP LOCKED` moves due jobs to running under a lease and commits before any external call; test of ordering by due time
       No transaction and no executor is held open across an external call: claim and commit, call, then record and commit
-- [ ] A lease that expires returns the job to ready through the transition function, so a restart retries in-flight jobs from their start; tests with fixed times passed in
-- [ ] Wake-up without idle polling: enqueueing signals the executor in process, and a timer sleeps until the next due time
+- [x] A lease that expires returns the job to ready through the transition function, so a restart retries in-flight jobs from their start; tests with due times and leases set relative to Postgres `now()`
+- [x] Wake-up without idle polling: enqueueing signals the executor in process, and a timer sleeps until the next due time
       The timer delay is computed by Postgres (due time minus `now()`), not by the process clock. No `LISTEN/NOTIFY`: `Bun.sql` cannot receive it, so it is added only if the executor becomes a separate process
-- [ ] Lanes in one registry in code: per job kind a concurrency cap, priority, retry policy and timeout; test that a full agent lane does not stop a send from being claimed
-- [ ] Retry policy as a pure backoff function; a timeout counts as a failed attempt; an exhausted job becomes failed; tests
+- [x] Lanes in one registry in code: per job kind a concurrency cap, retry policy and timeout; test that a full agent lane does not stop a send from being claimed
+- [x] Retry policy as a pure backoff function; a timeout counts as a failed attempt; an exhausted job becomes failed; tests
 - [ ] Run log table for agent runs; a finished job is deleted in the same transaction that writes its outcome to the run log
 - [ ] A job of another kind that exhausts its retries is shown on what it concerns: a fetch or token job sets the account status, a send job sets the message's send state, each with a reason
 - [ ] Retention cleanup job: run log rows older than 90 days and transcripts older than 30 days are deleted, except the transcript of a parked run until it resolves; test of the cutoff function
-- [ ] Fair claiming across users (round robin over users with ready jobs) and a per-user cap on running jobs; tests of fairness and ordering with one user holding a large backlog
-- [ ] Executor interface inside the Backend process: take a claimed job, return an outcome, hold nothing between jobs; one in-process implementation, so a separate process can replace it later
-- [ ] Postgres `now()` is the only source of "now": CI lint bans `Date.now()` and `new Date()` without arguments in the Backend
+- [ ] Fair claiming across users (round robin over users with ready jobs) and a per-user cap on running jobs, with a priority per lane deciding which lane goes first under that shared cap; tests of fairness and ordering with one user holding a large backlog
+- [x] Executor interface inside the Backend process: take a claimed job, return an outcome, hold nothing between jobs; one in-process implementation, so a separate process can replace it later
+- [x] Postgres `now()` is the only source of "now": CI lint bans `Date.now()` and `new Date()` without arguments in the Backend
 - [ ] Scheduled times arrive in `api.v1` as a `oneof` of an absolute UTC instant or wall time plus IANA zone; the server converts and stores a UTC `timestamptz`; tests of conversion across DST gap and overlap
 - [ ] Durations are integer seconds, named with a `_seconds` suffix in protobuf and columns
 - [ ] Recurrence rules stored with their zone; one pure next-run function for every schedule kind (every 15 minutes, every hour, daily at a time, weekdays at a time, custom); tests across DST changes

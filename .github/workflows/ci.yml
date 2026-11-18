@@ -8,6 +8,22 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      # Same image and tuning as compose.yaml; the Backend tests of job queries run against it
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: everymail
+          POSTGRES_DB: everymail
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://postgres:everymail@localhost:5432/everymail
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

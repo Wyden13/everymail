@@ -1,9 +1,11 @@
 import { SQL } from "bun";
 import { finishSignIn, signInCallback, signOut, startSignIn } from "./auth";
+import { createExecutor } from "./executor";
 import { AuthService } from "./gen/api/v1/auth_pb";
 import { HealthService } from "./gen/api/v1/health_pb";
 import { check } from "./health";
 import { serve } from "./http";
+import { LANES } from "./lanes";
 import { migrate } from "./migrate";
 import type { OidcConfig } from "./oidc";
 import { publicRpc, userCookieRpc } from "./rpc";
@@ -43,6 +45,7 @@ const table = new Map([
 const pages = new Map([["/auth/callback", signInCallback(sql, oidc)]]);
 
 await migrate(sql);
+createExecutor(sql, LANES);
 const server = serve(
 	table,
 	pages,
