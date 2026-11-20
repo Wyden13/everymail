@@ -11,7 +11,13 @@ import {
 	HealthService,
 } from "./gen/api/v1/health_pb";
 import { handleRequest } from "./http";
-import { type CookieChange, type Page, publicRpc, userRpc } from "./rpc";
+import {
+	type CookieChange,
+	type Page,
+	publicRpc,
+	type ReadCookie,
+	userRpc,
+} from "./rpc";
 import type { Session } from "./session";
 
 const path = "/api.v1.HealthService/Check";
@@ -108,14 +114,14 @@ test("bearer and cookie resolve to the same session", async () => {
 	}
 });
 
-const withCookie = (cookie: CookieChange) =>
+const withCookies = (cookies: CookieChange[]) =>
 	handleRequest(
 		new Map([
 			[
 				path,
 				{
 					access: "public",
-					decode: () => async () => ({ body: new Uint8Array(), cookie }),
+					decode: () => async () => ({ body: new Uint8Array(), cookies }),
 				},
 			],
 		]),
@@ -124,17 +130,52 @@ const withCookie = (cookie: CookieChange) =>
 	)(request());
 
 test("a set cookie reply sets the session cookie", async () => {
-	const res = await withCookie({ kind: "set", token: "t" });
-	expect(res.headers.get("set-cookie")).toBe(
+	const res = await withCookies([{ name: "session", kind: "set", token: "t" }]);
+	expect(res.headers.getSetCookie()).toEqual([
 		"__Host-session=t; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=34560000",
-	);
+	]);
 });
 
 test("a clear cookie reply expires the session cookie", async () => {
-	const res = await withCookie({ kind: "clear" });
-	expect(res.headers.get("set-cookie")).toBe(
+	const res = await withCookies([{ name: "session", kind: "clear" }]);
+	expect(res.headers.getSetCookie()).toEqual([
 		"__Host-session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
+	]);
+});
+
+test("the sign-in cookie survives the provider's redirect and each change is its own header", async () => {
+	const res = await withCookies([
+		{ name: "signIn", kind: "set", token: "c" },
+		{ name: "session", kind: "clear" },
+	]);
+	expect(res.headers.getSetCookie()).toEqual([
+		"__Host-sign-in=c; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600",
+		"__Host-session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
+	]);
+});
+
+test("a page reads the cookies by name", async () => {
+	const seen: (string | undefined)[] = [];
+	await handleRequest(
+		new Map(),
+		new Map([
+			[
+				"/auth/callback",
+				async (_: URLSearchParams, cookie: ReadCookie): Promise<Page> => {
+					seen.push(cookie("signIn"), cookie("session"));
+					return { kind: "text", status: 200, text: "" };
+				},
+			],
+		]),
+		nobody,
+	)(
+		new Request("http://x/auth/callback", {
+			headers: {
+				Cookie: "__Host-session=s; x__Host-sign-in=no; __Host-sign-in=c",
+			},
+		}),
 	);
+	expect(seen).toEqual(["c", "s"]);
 });
 
 test("a request with an unset oneof is 400", async () => {
@@ -172,7 +213,7 @@ test("a redirect page is a 303 that can set the cookie", async () => {
 	const res = await visit({
 		kind: "redirect",
 		to: "/",
-		cookie: { kind: "set", token: "t" },
+		cookies: [{ name: "session", kind: "set", token: "t" }],
 	});
 	expect(res.status).toBe(303);
 	expect(res.headers.get("location")).toBe("/");

@@ -1,6 +1,8 @@
+import { ATTEMPT_SECONDS } from "./auth";
 import type {
 	Call,
 	CookieChange,
+	CookieName,
 	Page,
 	Pages,
 	Reply,
@@ -10,24 +12,52 @@ import type {
 import type { Session } from "./session";
 
 const PROTO = "application/proto";
-const COOKIE = "__Host-session";
-/** The browser's cap on cookie lifetime. The session row decides when the session ends. */
-const COOKIE_MAX_AGE_SECONDS = 34_560_000;
+/** The session cookie lives for the browser's cap on cookie lifetime; the session row decides when the session ends.
+ * The sign-in cookie must arrive with the provider's redirect, a cross-site navigation, so it is Lax, and it lives as long as the attempt. */
+const COOKIES: Record<
+	CookieName,
+	{ name: string; sameSite: "Strict" | "Lax"; maxAgeSeconds: number }
+> = {
+	session: {
+		name: "__Host-session",
+		sameSite: "Strict",
+		maxAgeSeconds: 34_560_000,
+	},
+	signIn: {
+		name: "__Host-sign-in",
+		sameSite: "Lax",
+		maxAgeSeconds: ATTEMPT_SECONDS,
+	},
+};
 
 export type Resolve = (token: string) => Promise<Session | undefined>;
 
 const status = (code: number, headers?: HeadersInit) =>
 	new Response(null, { status: code, headers });
 
+const readCookie = (req: Request, name: CookieName) =>
+	req.headers
+		.get("cookie")
+		?.split(/;\s*/)
+		.find((pair) => pair.startsWith(`${COOKIES[name].name}=`))
+		?.slice(COOKIES[name].name.length + 1) || undefined;
+
 /** The bearer token of a native client, or else the session cookie of the web app. */
 const credential = (req: Request) =>
 	req.headers.get("authorization")?.match(/^Bearer (\S+)$/)?.[1] ??
-	req.headers.get("cookie")?.match(/(?:^|;\s*)__Host-session=([^;]+)/)?.[1];
+	readCookie(req, "session");
 
-export const cookieHeader = (change: CookieChange) =>
-	change.kind === "set"
-		? `${COOKIE}=${change.token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE_SECONDS}`
-		: `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
+export function cookieHeader(change: CookieChange) {
+	const { name, sameSite, maxAgeSeconds } = COOKIES[change.name];
+	const [value, maxAge] =
+		change.kind === "set" ? [change.token, maxAgeSeconds] : ["", 0];
+	return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=${sameSite}; Max-Age=${maxAge}`;
+}
+
+const setCookies = (headers: Headers, changes: CookieChange[] = []) => {
+	for (const change of changes)
+		headers.append("Set-Cookie", cookieHeader(change));
+};
 
 /** The call to run, or undefined when a user method has no live session. */
 async function authorize(
@@ -56,7 +86,7 @@ function render(page: Page): Response {
 		return new Response(page.text, { status: page.status, headers });
 	}
 	headers.set("Location", page.to);
-	if (page.cookie) headers.set("Set-Cookie", cookieHeader(page.cookie));
+	setCookies(headers, page.cookies);
 	return new Response(null, { status: 303, headers });
 }
 
@@ -67,7 +97,9 @@ export function handleRequest(table: RpcTable, pages: Pages, resolve: Resolve) {
 		if (page) {
 			if (req.method !== "GET") return status(405, { Allow: "GET" });
 			try {
-				return render(await page(url.searchParams));
+				return render(
+					await page(url.searchParams, (name) => readCookie(req, name)),
+				);
 			} catch (error) {
 				console.error(error);
 				return status(500);
@@ -97,7 +129,7 @@ export function handleRequest(table: RpcTable, pages: Pages, resolve: Resolve) {
 		try {
 			const reply = await call();
 			const headers = new Headers({ "Content-Type": PROTO });
-			if (reply.cookie) headers.set("Set-Cookie", cookieHeader(reply.cookie));
+			setCookies(headers, reply.cookies);
 			return new Response(reply.body.slice(), { headers });
 		} catch (error) {
 			console.error(error);

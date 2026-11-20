@@ -8,7 +8,7 @@ import { serve } from "./http";
 import { LANES } from "./lanes";
 import { migrate } from "./migrate";
 import type { OidcConfig } from "./oidc";
-import { publicRpc, userCookieRpc } from "./rpc";
+import { publicCookieRpc, publicRpc, userCookieRpc } from "./rpc";
 import { resolveSession } from "./session";
 
 function requireEnv(name: string): string {
@@ -38,7 +38,7 @@ const oidc: OidcConfig = {
 
 const table = new Map([
 	publicRpc(HealthService.method.check, () => check(sql)),
-	publicRpc(AuthService.method.startSignIn, startSignIn(sql, oidc)),
+	publicCookieRpc(AuthService.method.startSignIn, startSignIn(sql, oidc)),
 	publicRpc(AuthService.method.finishSignIn, finishSignIn(sql)),
 	userCookieRpc(AuthService.method.signOut, signOut(sql)),
 ]);

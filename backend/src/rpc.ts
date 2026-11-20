@@ -8,12 +8,17 @@ import {
 import { reflect } from "@bufbuild/protobuf/reflect";
 import type { Session } from "./session";
 
-/** What a call asks the transport to do with the web session cookie. Only AuthService sets it. */
-export type CookieChange = { kind: "set"; token: string } | { kind: "clear" };
-export type Reply = { body: Uint8Array; cookie?: CookieChange };
+/** The cookies the Backend writes: the web session, and the tie between a web sign-in and the browser that started it. */
+export type CookieName = "session" | "signIn";
+/** What a call asks the transport to do with a cookie. Only AuthService does. */
+export type CookieChange =
+	| { name: CookieName; kind: "set"; token: string }
+	| { name: CookieName; kind: "clear" };
+export type ReadCookie = (name: CookieName) => string | undefined;
+export type Reply = { body: Uint8Array; cookies?: CookieChange[] };
 export type Answer<O extends DescMessage> = {
 	message: MessageShape<O>;
-	cookie?: CookieChange;
+	cookies?: CookieChange[];
 };
 
 /** Decodes a request body, or throws if it is not a valid message. Returns the call to run. */
@@ -30,11 +35,11 @@ export type RpcTable = ReadonlyMap<string, Rpc>;
 
 /** A page a browser is sent to, such as the sign-in callback. Answered without protobuf. */
 export type Page =
-	| { kind: "redirect"; to: string; cookie?: CookieChange }
+	| { kind: "redirect"; to: string; cookies?: CookieChange[] }
 	| { kind: "text"; status: number; text: string };
 export type Pages = ReadonlyMap<
 	string,
-	(query: URLSearchParams) => Promise<Page>
+	(query: URLSearchParams, cookie: ReadCookie) => Promise<Page>
 >;
 
 const path = (method: DescMethodUnary) =>
@@ -56,8 +61,8 @@ function decoder<
 			throw new Error(`unset oneof in ${method.input.typeName}`);
 		}
 		return async (...args) => {
-			const { message, cookie } = await handler(request, ...args);
-			return { body: toBinary(method.output, message), cookie };
+			const { message, cookies } = await handler(request, ...args);
+			return { body: toBinary(method.output, message), cookies };
 		};
 	};
 }
@@ -67,15 +72,17 @@ export function publicRpc<I extends DescMessage, O extends DescMessage>(
 	method: DescMethodUnary<I, O>,
 	handler: (request: MessageShape<I>) => Promise<MessageShape<O>>,
 ): [path: string, rpc: Rpc] {
-	return [
-		path(method),
-		{
-			access: "public",
-			decode: decoder(method, async (request) => ({
-				message: await handler(request),
-			})),
-		},
-	];
+	return publicCookieRpc(method, async (request) => ({
+		message: await handler(request),
+	}));
+}
+
+/** A method anyone may call whose answer may also change a cookie. */
+export function publicCookieRpc<I extends DescMessage, O extends DescMessage>(
+	method: DescMethodUnary<I, O>,
+	handler: (request: MessageShape<I>) => Promise<Answer<O>>,
+): [path: string, rpc: Rpc] {
+	return [path(method), { access: "public", decode: decoder(method, handler) }];
 }
 
 /** A method for signed-in users. The handler runs only with a resolved session. */
@@ -91,7 +98,7 @@ export function userRpc<I extends DescMessage, O extends DescMessage>(
 	}));
 }
 
-/** A method for signed-in users whose answer may also change the web session cookie. */
+/** A method for signed-in users whose answer may also change a cookie. */
 export function userCookieRpc<I extends DescMessage, O extends DescMessage>(
 	method: DescMethodUnary<I, O>,
 	handler: (request: MessageShape<I>, session: Session) => Promise<Answer<O>>,
