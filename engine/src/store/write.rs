@@ -1253,7 +1253,8 @@ impl Store {
                 clear_data(&tx)?;
                 tx.execute("DELETE FROM session", [])?;
             }
-            Update::Refused { .. }
+            Update::SignInOpen(_)
+            | Update::Refused { .. }
             | Update::Failed { .. }
             | Update::ConnectRejected(_)
             | Update::Reply { .. }

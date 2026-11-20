@@ -6,8 +6,17 @@ export type Provider = "google" | "microsoft";
 export type Identity = { subject: string; email: string };
 export type OidcConfig = {
 	redirectUri: string;
-	clients: Record<Provider, { id: string; secret: string }>;
+	/** A provider without a client is not offered: starting a sign-in with it is refused. */
+	clients: Partial<Record<Provider, Client>>;
 };
+type Client = { id: string; secret: string };
+
+/** The provider's client. Only an attempt started with a configured provider gets this far. */
+function clientOf(config: OidcConfig, provider: Provider): Client {
+	const client = config.clients[provider];
+	if (!client) throw new Error(`${provider} has no client`);
+	return client;
+}
 
 const TOKEN_TIMEOUT_MS = 10_000;
 const MICROSOFT = "https://login.microsoftonline.com/common";
@@ -63,7 +72,7 @@ export function authorizeUrl(
 	const url = new URL(PROVIDERS[provider].authorize);
 	url.search = new URLSearchParams({
 		response_type: "code",
-		client_id: config.clients[provider].id,
+		client_id: clientOf(config, provider).id,
 		redirect_uri: config.redirectUri,
 		scope: PROVIDERS[provider].scope,
 		state: secrets.state,
@@ -96,7 +105,7 @@ export async function identify(
 	nonce: string,
 	now: Date,
 ): Promise<Identity | undefined> {
-	const client = config.clients[provider];
+	const client = clientOf(config, provider);
 	const res = await fetch(PROVIDERS[provider].token, {
 		method: "POST",
 		headers: { Accept: "application/json" },
