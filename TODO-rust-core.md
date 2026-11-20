@@ -32,7 +32,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
 - [ ] Session state as an explicit enum (signed out, signing in, signed in, expired) with one pure transition function and tests
       Signed out, signing in and signed in exist as the session row and a sign-in state; there is no expired state and no transition function
 - [ ] One Backend client attaches the session to every call and turns an expired session into the signed-out transition
-- [ ] `ui.v1` sign-in view and intents: choose Google or Microsoft, open the provider page in the system browser, finish against TODO-backend: `AuthService`
+- [ ] `ui.v1` sign-in view and intents: choose Google or Microsoft, open the provider page from `AuthService.StartSignIn` (the system browser on native, the same tab on web, where the Backend sets the cookie), then on native collect the session with `FinishSignIn` and the claim ("I've signed in" re-checks)
       Works against the demo Backend; the system browser is not opened and `AuthService` is not called
 - [ ] Per-screen queries: each view is built from queries scoped to the current screen and selection, replacing the load of the whole replica on every input (about 52 queries and a full in-memory copy today); measure with a 50k-message replica
       Fine at sample-data size; required before a real mailbox, for speed and for the RAM limit

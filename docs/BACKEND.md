@@ -37,11 +37,13 @@ Everything the Backend does on its own is a job: fetching mail, sending mail, sn
 ## Jobs
 
 - One jobs table in Postgres is the queue. All state lives in Postgres: an executor can die at any point and lose nothing
-- A job's status is an explicit enum: scheduled, ready, running (under a lease), waiting for approval, waiting for an event, paused, succeeded, failed, cancelled. A lease that expires returns the job to ready
+- A job's status is an explicit enum: scheduled, ready, running (under a lease), waiting for approval, waiting for an event, paused, succeeded, failed, cancelled. Succeeded, failed and cancelled are not stored: reaching one deletes the row
+- Scheduled and ready are both claimed once due. Scheduled is the one that can be edited or cancelled (a send, a snooze, a retry after backoff); ready runs as soon as its lane has room (a lease ran out, a resume, an awaited event arrived)
+- The lease is the lane's timeout. A lease that runs out is a failed attempt: the job returns to ready, or fails when its attempts are used up. A finish is recorded only while its own attempt still holds the job, so a late one changes nothing
 - Waiting for an event covers a tool result, a provider batch result and another agent finishing
 - Executors claim jobs in batches and never poll when idle: enqueueing signals the executor in process, and a timer sleeps until the next due time. `Bun.sql` cannot receive `LISTEN/NOTIFY`, so that is added only when the executor becomes a separate process
 - No transaction and no executor is held open across an external call: claim and commit, call, then record and commit
-- One mechanism, several lanes. Each job kind has its own concurrency cap, priority, retry policy and timeout, so slow agent steps never delay a send
+- One mechanism, several lanes. Each job kind is a lane with its own concurrency cap, retry policy and timeout, so slow agent steps never delay a send. Within a lane, jobs are claimed by due time. Priority between lanes comes with the per-user cap, the first limit lanes share
 - Columns hold what the claim query needs; the rest of the payload is protobuf
 - A finished job is deleted; the run log is what is kept. The run log covers agent runs. A job of another kind that keeps failing shows on the thing it concerns: the account's status or the message's send state
 - The run log is kept 90 days. The transcript, which holds mail content and model output, is deleted after 30 days; a parked run keeps its transcript until it resolves
@@ -132,6 +134,14 @@ The user can write to an agent and get an answer, for a question about their mai
 
 - Users sign in with Google or Microsoft. An EveryAI account is added later
 - Sign-in is separate from connecting mail accounts, though the first sign-in can connect that provider's mailbox in the same step
+- OIDC authorization code flow with PKCE and a nonce. The provider redirects to the Backend's `GET /auth/callback`, the one redirect URI for every client, and the Backend exchanges the code and checks the ID token itself, so the engine runs no local server and needs no deep link
+- `StartSignIn` records an attempt that lives 600 seconds and returns the provider page plus a claim. The `state` sent to the provider passes through the browser, so it is never the secret that collects the session
+- Web: the callback sets the session cookie and redirects to the app. Native: the callback page says to return to the app, and the engine collects the session with `FinishSignIn` and its claim, once
+- A web sign-in finishes only in the browser that started it. `StartSignIn` gives a web client no claim: the Backend sets it as a short-lived cookie (`__Host-sign-in`, HttpOnly, Secure, SameSite=Lax so it arrives with the provider's redirect), and the callback refuses an attempt whose cookie is missing or different. Otherwise a callback link made with someone else's account would sign a visitor in to that account
+- A native sign-in cannot be tied to a browser this way, because the system browser and the app share nothing. See the open decision in the roadmap
+- A user is the provider plus its `sub` claim. The email is for display only, so the same person through Google and through Microsoft is two users
+- The session is an opaque random token; only its SHA-256 is stored. It lives 30 days from its last use, renewed at most once a day. Native clients send it as a bearer token; web gets it as the `__Host-session` cookie (HttpOnly, Secure, SameSite=Strict), and both resolve to the same row
+- Cross-site requests cannot ride on the cookie: every call is a POST with `Content-Type: application/proto`, which needs a CORS preflight the Backend never grants, and the cookie is SameSite=Strict
 
 ## Schema
 
@@ -203,6 +213,7 @@ Everything the app does with judgement is done by an agent the user can see. Not
 - TLS ends at the reverse proxy that already serves the EveryAI services. It must not buffer the sync stream
 - The domain is mail.everyai.dev, shared by the landing page, the web app and the Backend's calls
 - The key that encrypts provider tokens and LLM keys is a file on the VM, outside Postgres, readable only by the account the Backend service runs as
+- The Google and Microsoft sign-in client ids and secrets come from the service's environment, with `PUBLIC_ORIGIN`; the Backend refuses to start without them. The redirect URI registered with both is `https://mail.everyai.dev/auth/callback`
 - No backups at first. Mail can be synced again from the providers; agents, notes, rules and run logs would be lost with the VM. This is acceptable only before real users and is revisited then
 - Logs go to the system journal and carry ids, kinds and durations only: never mail content, prompts or tokens
 - A watchdog job checks queue depth, the oldest ready job and failure rates, and notifies the owner when a threshold is crossed. No external monitoring service

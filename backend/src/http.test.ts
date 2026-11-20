@@ -1,31 +1,49 @@
 import { expect, test } from "bun:test";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import {
+	AuthService,
+	StartSignInRequestSchema,
+	StartSignInResponseSchema,
+} from "./gen/api/v1/auth_pb";
+import {
 	CheckRequestSchema,
 	CheckResponseSchema,
 	HealthService,
 } from "./gen/api/v1/health_pb";
 import { handleRequest } from "./http";
-import { rpc } from "./rpc";
+import {
+	type CookieChange,
+	type Page,
+	publicRpc,
+	type ReadCookie,
+	userRpc,
+} from "./rpc";
+import type { Session } from "./session";
 
 const path = "/api.v1.HealthService/Check";
+const response = () =>
+	create(CheckResponseSchema, {
+		database: { case: "unavailable", value: {} },
+	});
+const request = (
+	headers: HeadersInit = {},
+	body: BodyInit = new Uint8Array(),
+) =>
+	new Request(`http://x${path}`, {
+		method: "POST",
+		headers: { "Content-Type": "application/proto", ...headers },
+		body,
+	});
+
+const nobody = async () => undefined;
+const noPages = new Map();
 const handle = handleRequest(
-	new Map([
-		rpc(HealthService.method.check, async () =>
-			create(CheckResponseSchema, {
-				database: { case: "unavailable", value: {} },
-			}),
-		),
-	]),
+	new Map([publicRpc(HealthService.method.check, async () => response())]),
+	noPages,
+	nobody,
 );
 const post = (body: BodyInit, contentType = "application/proto") =>
-	handle(
-		new Request(`http://x${path}`, {
-			method: "POST",
-			headers: { "Content-Type": contentType },
-			body,
-		}),
-	);
+	handle(request({ "Content-Type": contentType }, body));
 
 test("round trips protobuf through the handler", async () => {
 	const res = await post(
@@ -57,4 +75,162 @@ test("wrong content type is 415", async () => {
 
 test("undecodable body is 400", async () => {
 	expect((await post(new Uint8Array([0xff]))).status).toBe(400);
+});
+
+const live: Session = { userId: "7", tokenHash: new Uint8Array([1]) };
+const received: Session[] = [];
+const handleUser = handleRequest(
+	new Map([
+		userRpc(HealthService.method.check, async (_, session) => {
+			received.push(session);
+			return response();
+		}),
+	]),
+	noPages,
+	async (token: string) => (token === "good" ? live : undefined),
+);
+
+test("user method without a credential is 401 and never runs", async () => {
+	received.length = 0;
+	expect((await handleUser(request())).status).toBe(401);
+	expect(received).toEqual([]);
+});
+
+test("user method with an unknown bearer is 401", async () => {
+	received.length = 0;
+	const res = await handleUser(request({ Authorization: "Bearer bad" }));
+	expect(res.status).toBe(401);
+	expect(received).toEqual([]);
+});
+
+test("bearer and cookie resolve to the same session", async () => {
+	for (const headers of <HeadersInit[]>[
+		{ Authorization: "Bearer good" },
+		{ Cookie: "theme=dark; __Host-session=good" },
+	]) {
+		received.length = 0;
+		expect((await handleUser(request(headers))).status).toBe(200);
+		expect(received).toEqual([live]);
+	}
+});
+
+const withCookies = (cookies: CookieChange[]) =>
+	handleRequest(
+		new Map([
+			[
+				path,
+				{
+					access: "public",
+					decode: () => async () => ({ body: new Uint8Array(), cookies }),
+				},
+			],
+		]),
+		noPages,
+		nobody,
+	)(request());
+
+test("a set cookie reply sets the session cookie", async () => {
+	const res = await withCookies([{ name: "session", kind: "set", token: "t" }]);
+	expect(res.headers.getSetCookie()).toEqual([
+		"__Host-session=t; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=34560000",
+	]);
+});
+
+test("a clear cookie reply expires the session cookie", async () => {
+	const res = await withCookies([{ name: "session", kind: "clear" }]);
+	expect(res.headers.getSetCookie()).toEqual([
+		"__Host-session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
+	]);
+});
+
+test("the sign-in cookie survives the provider's redirect and each change is its own header", async () => {
+	const res = await withCookies([
+		{ name: "signIn", kind: "set", token: "c" },
+		{ name: "session", kind: "clear" },
+	]);
+	expect(res.headers.getSetCookie()).toEqual([
+		"__Host-sign-in=c; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600",
+		"__Host-session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
+	]);
+});
+
+test("a page reads the cookies by name", async () => {
+	const seen: (string | undefined)[] = [];
+	await handleRequest(
+		new Map(),
+		new Map([
+			[
+				"/auth/callback",
+				async (_: URLSearchParams, cookie: ReadCookie): Promise<Page> => {
+					seen.push(cookie("signIn"), cookie("session"));
+					return { kind: "text", status: 200, text: "" };
+				},
+			],
+		]),
+		nobody,
+	)(
+		new Request("http://x/auth/callback", {
+			headers: {
+				Cookie: "__Host-session=s; x__Host-sign-in=no; __Host-sign-in=c",
+			},
+		}),
+	);
+	expect(seen).toEqual(["c", "s"]);
+});
+
+test("a request with an unset oneof is 400", async () => {
+	const res = await handleRequest(
+		new Map([
+			publicRpc(AuthService.method.startSignIn, async () =>
+				create(StartSignInResponseSchema),
+			),
+		]),
+		noPages,
+		nobody,
+	)(
+		new Request("http://x/api.v1.AuthService/StartSignIn", {
+			method: "POST",
+			headers: { "Content-Type": "application/proto" },
+			body: toBinary(
+				StartSignInRequestSchema,
+				create(StartSignInRequestSchema, {
+					client: { case: "native", value: {} },
+				}),
+			),
+		}),
+	);
+	expect(res.status).toBe(400);
+});
+
+const visit = (page: Page, method = "GET") =>
+	handleRequest(
+		new Map(),
+		new Map([["/auth/callback", async () => page]]),
+		nobody,
+	)(new Request("http://x/auth/callback?code=c&state=s", { method }));
+
+test("a redirect page is a 303 that can set the cookie", async () => {
+	const res = await visit({
+		kind: "redirect",
+		to: "/",
+		cookies: [{ name: "session", kind: "set", token: "t" }],
+	});
+	expect(res.status).toBe(303);
+	expect(res.headers.get("location")).toBe("/");
+	expect(res.headers.get("set-cookie")).toStartWith("__Host-session=t;");
+	expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+	expect(res.headers.get("cache-control")).toBe("no-store");
+});
+
+test("a text page keeps its status and is plain text", async () => {
+	const res = await visit({ kind: "text", status: 400, text: "Expired" });
+	expect(res.status).toBe(400);
+	expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+	expect(await res.text()).toBe("Expired");
+});
+
+test("a page answers GET only", async () => {
+	const res = await visit({ kind: "text", status: 200, text: "" }, "POST");
+	expect(res.status).toBe(405);
+	expect(res.headers.get("allow")).toBe("GET");
 });
