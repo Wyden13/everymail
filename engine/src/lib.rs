@@ -12,6 +12,7 @@ mod path;
 mod platform;
 mod preferences;
 mod schedule;
+mod session;
 mod store;
 mod time;
 mod view;
@@ -67,6 +68,11 @@ pub struct Engine(Arc<Shared>);
 
 struct Shared {
     check_url: String,
+    /// `AuthService`'s methods follow this.
+    auth_url: String,
+    /// The session's bearer token on desktop, read from the keychain at launch. The web app's
+    /// session is a cookie the engine never holds.
+    credential: Mutex<Option<String>>,
     spawn: Spawn,
     backend: Box<dyn Backend>,
     /// The new mail shortcut as this device writes it.
@@ -179,6 +185,7 @@ impl Engine {
         let now = backend.now();
         let world = store.load(now, None)?;
         let start = navigation::start(&world);
+        let signed_out = world.user.is_none();
         let navigation = match (&world.user, store.navigation_path()?) {
             (Some(_), Some(path)) => {
                 navigation::transition(&start, navigation::Event::OpenPath(path), &world)
@@ -193,6 +200,8 @@ impl Engine {
         let preferences = store.preferences()?.unwrap_or(preferences::START);
         let engine = Self(platform::shared(Shared {
             check_url: format!("{backend_url}/api.v1.HealthService/Check"),
+            auth_url: format!("{backend_url}/api.v1.AuthService/"),
+            credential: Mutex::new(None),
             spawn,
             backend,
             shortcut: platform::new_mail_shortcut(),
@@ -211,6 +220,7 @@ impl Engine {
         }));
         engine.0.backend.start(engine.link());
         engine.run(effect);
+        engine.open_session(signed_out);
         Ok(engine)
     }
 
@@ -393,6 +403,9 @@ impl Engine {
         }
         for work in effects.work {
             self.request(work);
+        }
+        if let Some(auth) = effects.auth {
+            self.authenticate(auth);
         }
         self.navigate(state, effects.navigate)
     }
@@ -627,7 +640,8 @@ impl Engine {
     }
 
     async fn check(&self) -> connection::Event {
-        let Some(body) = platform::post(&self.0.check_url, CheckRequest {}.encode_to_vec()).await
+        let Some(body) =
+            platform::post(&self.0.check_url, CheckRequest {}.encode_to_vec(), None).await
         else {
             return connection::Event::BackendUnreachable;
         };
@@ -705,13 +719,22 @@ mod tests {
                 provider: ui::SignInProvider::Microsoft.into(),
             }),
         );
-        assert!(matches!(
-            backend.take().as_slice(),
-            [Work::SignIn(Identity::Microsoft)]
-        ));
+        assert!(
+            backend.take().is_empty(),
+            "the engine signs in with AuthService itself"
+        );
         assert_eq!(
             engine.lock().live.sign_in,
-            live::SignIn::Waiting(Identity::Microsoft)
+            live::SignIn::Waiting(Identity::Microsoft, live::SignInStep::Starting)
+        );
+        let open = || Input::Update(Update::SignInOpen("https://provider/".into()));
+        engine.dispatch(open()).unwrap();
+        assert_eq!(
+            engine.lock().live.sign_in,
+            live::SignIn::Waiting(
+                Identity::Microsoft,
+                live::SignInStep::Open("https://provider/".into())
+            )
         );
         send(&engine, Kind::CancelSignIn(ui::CancelSignIn {}));
         assert!(matches!(
@@ -719,6 +742,12 @@ mod tests {
             [Work::Cancel(Request::SignIn)]
         ));
         assert_eq!(engine.lock().live.sign_in, live::SignIn::Idle);
+        engine.dispatch(open()).unwrap();
+        assert_eq!(
+            engine.lock().live.sign_in,
+            live::SignIn::Idle,
+            "a page that arrives after the user stopped waiting is not opened"
+        );
 
         // The Backend's answers come in as inputs too.
         for update in [

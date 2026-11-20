@@ -22,6 +22,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
 ## Session and local database
 
 - [ ] Session credential in the OS keychain on desktop and mobile (macOS, Windows, Linux Secret Service, iOS, Android) behind the platform adapter
+      Desktop is done through the `keyring` crate (macOS, Windows, Linux Secret Service); iOS and Android are not
 - [ ] On Linux without a keychain service the credential goes into a file only the user can read; test that the file is created with owner-only permissions
 - [ ] Credential storage notice as an explicit enum (none, file fallback not yet told, told) persisted by the engine and sent in the shell view, so the app says so once
 - [x] rusqlite (bundled) added with the first local table; the database is not encrypted and no secret is stored in it
@@ -32,9 +33,11 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
 - [ ] Session state as an explicit enum (signed out, signing in, signed in, expired) with one pure transition function and tests
       Signed out, signing in and signed in exist as the session row and a sign-in state; there is no expired state and no transition function
 - [ ] One Backend client attaches the session to every call and turns an expired session into the signed-out transition
-- [ ] `ui.v1` sign-in view and intents: choose Google or Microsoft, open the provider page from `AuthService.StartSignIn` (the system browser on native, the same tab on web, where the Backend sets the cookie), then on native collect the session with `FinishSignIn`, the claim and the handoff
-      Works against the demo Backend; the system browser is not opened and `AuthService` is not called
-- [ ] Loopback listener behind the platform adapter for native sign-in: bind 127.0.0.1 on a free port, name it in `StartSignIn`, accept one POST to `/` carrying the form field `handoff`, answer a plain page, and close when the attempt ends or is cancelled; a failed or closed listener is an explicit sign-in state. Check in Chrome, Safari and Firefox that the Backend's page may post to 127.0.0.1 without a prompt
+      `AuthService` calls carry the bearer; nothing turns a 401 into signed out yet
+- [x] `ui.v1` sign-in view and intents: choose Google or Microsoft, open the provider page from `AuthService.StartSignIn` (the system browser on native, the same tab on web, where the Backend sets the cookie), then on native collect the session with `FinishSignIn`, the claim and the handoff
+      Mail is still the demo's sample after sign-in
+- [ ] A provider step the user cancelled or that failed never reaches the loopback, so desktop waits until Cancel: poll `FinishSignIn` with the claim alone while listening, which already answers denied or failed
+- [x] Loopback listener behind the platform adapter for native sign-in: bind 127.0.0.1 on a free port, name it in `StartSignIn`, accept one POST to `/` carrying the form field `handoff`, answer a plain page, and close when the attempt ends or is cancelled; a failed or closed listener is an explicit sign-in state. Check in Chrome, Safari and Firefox that the Backend's page may post to 127.0.0.1 without a prompt
 - [ ] Per-screen queries: each view is built from queries scoped to the current screen and selection, replacing the load of the whole replica on every input (about 52 queries and a full in-memory copy today); measure with a 50k-message replica
       Fine at sample-data size; required before a real mailbox, for speed and for the RAM limit
 - [ ] The Backend port's requests and updates defined as `api.v1` protobuf messages and generated with prost, replacing the Rust types in `engine/src/backend.rs`

@@ -26,6 +26,10 @@ export default defineConfig({
 		port: 5173,
 		strictPort: true,
 		headers: { "Service-Worker-Allowed": "/" },
-		proxy: { "/api.v1.": "http://127.0.0.1:8787" },
+		// The sign-in callback sets the session cookie, so it is served on the app's origin too.
+		proxy: {
+			"/api.v1.": "http://127.0.0.1:8787",
+			"/auth/": "http://127.0.0.1:8787",
+		},
 	},
 });

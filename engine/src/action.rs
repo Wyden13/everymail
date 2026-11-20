@@ -6,7 +6,9 @@ use crate::{
     backend::{Request, SendAt, Work},
     builder,
     date::Date,
-    live::{self, DryRun, Export, Field, Generation, ImapCheck, Live, SignIn, Target, Undo},
+    live::{
+        self, DryRun, Export, Field, Generation, ImapCheck, Live, SignIn, SignInStep, Target, Undo,
+    },
     navigation::{self, ConnectStep, Disclosure, Navigation, PaneChoice, Route, Screen, Selection},
     proto::ui::v1::{Form, MailProvider, ModelProvider, PermissionLevel},
     schedule::Schedule,
@@ -161,6 +163,14 @@ pub enum Action {
 pub struct Effects {
     pub work: Vec<Work>,
     pub navigate: Vec<navigation::Event>,
+    pub auth: Option<Auth>,
+}
+
+/// Sign-in and sign-out, which the engine carries out with `AuthService` itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Auth {
+    SignIn(Identity),
+    SignOut,
 }
 
 pub struct Context<'a> {
@@ -466,21 +476,23 @@ impl Context<'_> {
         let mut fx = Effects {
             work: Vec::new(),
             navigate: Vec::new(),
+            auth: None,
         };
         let w = self.world;
         let s = self.store;
         let now = self.now;
         match action {
             Action::SignIn(provider) => {
-                if !matches!(self.live.sign_in, SignIn::Waiting(_)) {
-                    self.live.sign_in = SignIn::Waiting(provider);
-                    fx.work.push(Work::SignIn(provider));
+                if !matches!(self.live.sign_in, SignIn::Waiting(..)) {
+                    self.live.sign_in = SignIn::Waiting(provider, SignInStep::Starting);
+                    fx.auth = Some(Auth::SignIn(provider));
                 }
             }
             Action::CancelSignIn => self.cancel(Request::SignIn, &mut fx),
             Action::SignOut => {
                 s.sign_out()?;
                 self.live.clear();
+                fx.auth = Some(Auth::SignOut);
                 fx.navigate.push(navigation::Event::Refresh);
             }
             Action::DeleteUser => fx.work.push(Work::DeleteUser),
