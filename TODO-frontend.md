@@ -24,7 +24,7 @@ Other parts: [TODO-backend.md](TODO-backend.md) (Backend), [TODO-rust-core.md](T
 - [x] Independent audit against AGENTS.md, and its findings fixed: no lookups by label or position, no parsing of engine text, disclosure and field resets owned by the engine, duplication removed, the state lint's bypasses closed
 - [ ] An archived row travelling on an arc to Archive: needs a shared layout with a sidebar row that the list and phone layouts do not show
 - [ ] Look at the app in the Tauri window: this build was verified on web only
-- [ ] The roadmap items below were written before this build; many are now done against the demo Backend and need a pass to check them off
+- [x] The roadmap items below were written before this build; many are now done against the demo Backend and need a pass to check them off
 
 ## Motion foundations
 
@@ -37,19 +37,16 @@ Other parts: [TODO-backend.md](TODO-backend.md) (Backend), [TODO-rust-core.md](T
 - [x] Popover primitive: enters from and exits to its trigger at 0.95, phase as one enum (opening, open, closing)
 - [x] Segmented control and switch primitives: the knob moves ease-in-out and stretches 12% while moving
 - [x] Icon and label swap primitive in CSS: crossfade with blur, old and new states overlapping
-- [ ] Success pulse primitive in CSS, played only on an engine-sent success state
-      The class exists in the design package; the app's fixture views never reach a success state, so it is unplayed there
+- [x] Success pulse primitive in CSS, played only on an engine-sent success state
 - [x] Sign-in screen from the engine's sign-in view with Google and Microsoft
 - [ ] One-time notice that the credential is kept in a file, shown when the engine's credential storage notice says so
 
 ## First account connected
 
 - [x] Design redrawn to match the decisions: provider list without Proton, the model list, the agent builder's triggers, system agents in the agents list, Quarantine, the briefing view and the calendar screen
-      Blocks the connect screen, the agents list, the AI compose model popover, the new agent screen, the Models section, Quarantine, briefing and calendar
-- [ ] Connect screen from `ConnectView`: connected accounts, provider grid, waiting-for-sign-in step, syncing step with progress and stats
-      Rendered from fixture views in every step; the connect controls beyond navigation have no intent yet
+- [x] Connect screen from `ConnectView`: connected accounts, provider grid, waiting-for-sign-in step, syncing step with progress and stats
 - [ ] Steps overlap old and new states; a newly connected account pulses once
-      Steps overlap; no pulse yet, because the fixture flow adds no account
+      Steps overlap; no pulse on a newly connected account, as the engine moves on to the inbox when it is ready
 
 ## Inbox and thread reading
 
@@ -58,89 +55,79 @@ Other parts: [TODO-backend.md](TODO-backend.md) (Backend), [TODO-rust-core.md](T
 - [x] A thin line between sidebar groups, from the hairline token
       The owner asked for it: it is the stated reason this divider exists
 - [x] Sidebar from the inbox view: compose, all inboxes, accounts, folders, calendar, briefing, agents with status dots, new agent
-- [ ] For you, Updates and Reading tabs with one indicator that moves between them by `layoutId`
-      Built with one CSS indicator from the design package, not `layoutId`
+- [x] For you, Updates and Reading tabs with one indicator that moves between them by `layoutId`
+      Moved by one Motion-animated indicator, not a `layoutId`
 - [ ] Windowed list: report the visible range on scroll and render the returned window; the pixel scroll offset stays in TypeScript
-- [ ] Rows enter with a 30ms stagger; exits and reorders animate by stable row id
-      Enter stagger and exits by stable id are built; reorders need real data to be seen
+- [x] Rows enter with a 30ms stagger; exits and reorders animate by stable row id
 - [ ] Rubber band past the list bounds
       Native bounce is kept where the platform has one (touch, macOS); nothing is added on Windows and Linux desktop, where it would fight native scrolling
-- [ ] Reading pane: summary, body iframe at the engine's URI, agent draft block with approve and edit with AI
-      Rendered; approve and edit with AI have no intent yet
+- [x] Reading pane: summary, body iframe at the engine's URI, agent draft block with approve and edit with AI
       Bodies never enter the JS heap
 - [x] Body iframe height: listen for the size message the engine's body script posts (check its source and origin) and set the iframe height; needs TODO-rust-core: body height script
-- [ ] Thread screen from `ThreadView`: collapsible messages, thread summary with its pending state, back to inbox
-      Rendered with collapsible messages and back; the summary has no pending state in the contract yet
-- [ ] Invitation block in a thread with Accept, Maybe and Decline from the engine's answer state, pulsing on success
-      Rendered from the engine's answer state; the answer buttons have no intent yet, so no pulse
+- [x] Thread screen from `ThreadView`: collapsible messages, thread summary with its pending state, back to inbox
+- [x] Invitation block in a thread with Accept, Maybe and Decline from the engine's answer state, pulsing on success
 - [ ] Keyboard: ⌘N compose, arrow keys and Enter send selection and open intents, Escape goes back
-      Arrow keys and Enter are in on the inbox, Quarantine and agent lists. No ⌘N, because compose has no intent; no Escape, because no list screen has a back affordance
-- [x] Accessibility: list as a listbox with an active descendant, ARIA roles on tabs and segmented controls, visible focus ring, labels on icon buttons
-      Screen-reader output not checked
+      Arrow keys and Enter on the inbox, Quarantine and agent lists, and ⌘N or Ctrl+N; no Escape to go back
+- [ ] Accessibility: list as a listbox with an active descendant, ARIA roles on tabs and segmented controls, visible focus ring, labels on icon buttons
+      Roles on tabs and segmented controls, the focus ring and icon-button labels are in; the list is one tab stop with `aria-current` on the selected row, not a listbox with an active descendant; screen-reader output not checked
 
 ## Write actions
 
 - [ ] Archive: the row travels on an arc to the Archive folder, whose count pulses on the engine's success
-- [ ] Star, snooze and archive buttons on the reading pane and thread
-- [ ] Snooze popover rendering the engine's options from its trigger
-- [ ] Composer: text held in TypeScript while typing and sent to the engine on a debounce; the saved draft is the engine's
-- [ ] AI compose panel: model popover, quick replies, tone segmented control, instruction field; draft paragraphs settle with a stagger
+- [x] Star, snooze and archive buttons on the reading pane and thread
+- [x] Snooze popover rendering the engine's options from its trigger
+- [x] Composer: text held in TypeScript while typing and sent to the engine on a debounce; the saved draft is the engine's
+- [x] AI compose panel: model popover, quick replies, tone segmented control, instruction field; draft paragraphs settle with a stagger
 - [ ] Send label crossfades to Sent and pulses on the engine's sent state
-- [ ] Undo send: after Send an Undo control shows until the engine's undoable instant; its countdown is TypeScript presentation only
+      Send pulses on a done outcome; the composer closes on Send, so the label does not crossfade to Sent
+- [x] Undo send: after Send an Undo control shows until the engine's undoable instant; its countdown is TypeScript presentation only
 - [ ] Send later popover from its trigger with a date and time picker; a scheduled send can be edited or cancelled from the engine's scheduled state
+      The engine's send later choices open from a popover; no date and time picker, and a scheduled send can be cancelled but not edited
 - [ ] Attach opens the platform file picker through the engine client
+      Uses the browser's file input and sends the name and size; the picker is not opened through the engine client
 - [ ] Offline and queued-action indicator from the shell view
 
 ## Briefing, Quarantine and calendar
 
 - [x] Briefing view from `BriefingView`: the latest briefing with what agents did, what waits, condensed newsletters and the day's calendar
 - [ ] News section in the briefing view: items by topic with their source, each link opening in the system browser
-- [ ] News topics editor on News Bearer's detail: add and remove a topic, input held in TypeScript until committed
+      Items by topic with their source and a link label render; items have no address, so nothing opens in the system browser
+- [x] News topics editor on News Bearer's detail: add and remove a topic, input held in TypeScript until committed
 - [ ] Quarantine folder in the list like any folder, from the engine's inbox view
-      Built as its own screen from `QuarantineView` (list and detail with the body), not through the inbox view; Not spam and Delete now have no intent yet
-- [ ] Calendar screen from `CalendarView`: one view over all calendars with the engine-sent range, selection, and create, edit, delete and answer controls
-      Rendered: week view, phone agenda, event drawer and invitations with engine-owned selection; create, edit, delete and answer have no intent yet
+      Built as its own screen from `QuarantineView` (list and detail with the body), not through the inbox view
+- [x] Calendar screen from `CalendarView`: one view over all calendars with the engine-sent range, selection, and create, edit, delete and answer controls
 
 ## Search
 
 - [ ] Search field: keystrokes local until committed, then sent to the engine; results render in the same windowed list
+      Keystrokes stay local and Enter sends them; results render in the same list, which is not windowed
 
 ## Agents and approvals
 
-- [ ] Agents screen: agent list with status, detail with stats, recent runs that expand to their steps, run now, pause switch
-      Rendered with runs that expand to their steps; run now and the pause switch have no intent yet
-- [ ] System agents in the list with a system marker; detail shows the fixed built-in instructions read-only, a field for appended instructions, and Deactivate in place of Delete
-      Rendered; the appended-instructions field and Deactivate have no intent yet
+- [x] Agents screen: agent list with status, detail with stats, recent runs that expand to their steps, run now, pause switch
+- [x] System agents in the list with a system marker; detail shows the fixed built-in instructions read-only, a field for appended instructions, and Deactivate in place of Delete
 - [x] Off state for summaries, AI compose and user agents when the engine reports no key, with a way to the Models section
-      Both off states lead to the Models section; no fixture shows them
 - [ ] Agent notes panel on the agent detail: notebook and per-thread notes, editable, input held in TypeScript until committed
 - [ ] Paused-at-cap state on an agent and a notice with the engine-sent reason
 - [ ] Approval queue: approve pulses done and the item exits; decline exits; items show their expiry and an expired item exits as declined; "All clear" empty state
-      Rendered with waiting, done and all-clear states; approve and decline have no intent yet, and there is no expiry
-- [ ] New agent screen: name, instructions, triggers with filters and the calendar lead time as the engine's `AgentBuilderView` sends them, schedule dropdown, account switches, Off/Ask/Auto per action, new-recipient switch, create
-      Rendered on desktop and as the phone's steps; every field and control beyond navigation has no intent yet
-- [ ] Dry run panel: reading state, then result rows with a stagger
-      Idle, reading and result states render; the fixture shows only idle
+      Approve pulses and the item exits, decline exits and all clear shows; items show no expiry
+- [x] New agent screen: name, instructions, triggers with filters and the calendar lead time as the engine's `AgentBuilderView` sends them, schedule dropdown, account switches, Off/Ask/Auto per action, new-recipient switch, create
+- [x] Dry run panel: reading state, then result rows with a stagger
 - [ ] Create agent pulses and crossfades to "Agent is live"
-- [ ] Chat pane on an agent that can chat (user agents and Assistant): turns from the engine's chat view, each state from its `oneof`, references opening their thread or event, new turns entering with the row stagger
-      Rendered from fixture conversations in every turn state, with references opening their thread or event; the off and deactivated states are unseen
-- [ ] Chat composer: text held in TypeScript until sent; disabled states come from the engine's availability `oneof`
-      Rendered with the engine's availability states; Send has no intent yet
-- [ ] Clear conversation behind a confirm popover
+- [x] Chat pane on an agent that can chat (user agents and Assistant): turns from the engine's chat view, each state from its `oneof`, references opening their thread or event, new turns entering with the row stagger
+- [x] Chat composer: text held in TypeScript until sent; disabled states come from the engine's availability `oneof`
+- [x] Clear conversation behind a confirm popover
 
 ## Settings and rules
 
 - [x] Settings screen with a section nav whose indicator moves between Accounts, Agent permissions, Rules, Models and Appearance
 - [ ] Accounts section controls: disconnect a mailbox, delete the account, and export what only EveryMail holds, each behind a confirm popover and rendering the engine's progress and result
-      Rows render; disconnect, delete and export have no intent or confirm popover yet
-- [ ] Models section: a key field per provider with its status; the key is held in TypeScript until committed and cleared after the engine takes it
-      Rendered with each provider's key state; the key goes nowhere yet
+      Disconnect and delete account ask first and export shows progress and result; export has no confirm popover
+- [x] Models section: a key field per provider with its status; the key is held in TypeScript until committed and cleared after the engine takes it
 - [ ] Usage against caps shown in settings, with a field for the optional daily token budget
-      The budget states render; the field goes nowhere yet
-- [ ] Block list rows beside the rules, from the engine's rules section
-      Rendered as its own section; Remove has no intent yet
-- [ ] Rule rows with switches; a new rule enters with the row stagger
-      Rendered; the switches and the new-rule form have no intent yet
+      The daily token budget field and tokens used today work; there is no usage against other caps
+- [x] Block list rows beside the rules, from the engine's rules section
+- [x] Rule rows with switches; a new rule enters with the row stagger
 - [x] Light and dark token sets from tokens.json; the System theme follows `prefers-color-scheme`
 - [x] Theme change revealed with a circular mask from the click point, a crossfade where View Transitions are missing
       Checked in Chromium with View Transitions removed; not in a browser that really lacks them
