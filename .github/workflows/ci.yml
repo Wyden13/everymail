@@ -8,6 +8,22 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      # Same image and tuning as compose.yaml; the Backend tests of job queries run against it
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: everymail
+          POSTGRES_DB: everymail
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://postgres:everymail@localhost:5432/everymail
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -22,6 +38,11 @@ jobs:
       - name: Tauri system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev
       - run: bun install --frozen-lockfile
+      - name: Protobuf breaking changes
+        if: github.event_name == 'pull_request'
+        # Only api.v1 crosses a wire between parts deployed apart. ui.v1 ships inside one client build, so it may change freely
+        working-directory: proto
+        run: bunx buf breaking --path api --against "https://github.com/${{ github.repository }}.git#branch=${{ github.base_ref }},subdir=proto"
       - run: bun run gen
       - run: bun run wasm
       - run: bun run check

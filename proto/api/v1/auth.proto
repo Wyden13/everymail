@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package api.v1;
+
+// Engine to Backend. Wire: POST /api.v1.AuthService/<Method>, body application/proto.
+// The provider redirects to the Backend's GET /auth/callback, which finishes the sign-in.
+service AuthService {
+  // Public. Returns the provider page to open. A native client also gets the claim it collects the session with.
+  // A web client gets no claim: the Backend keeps it in a cookie, so the sign-in finishes only in the browser that started it.
+  rpc StartSignIn(StartSignInRequest) returns (StartSignInResponse);
+  // Public, native clients only: collects the session once the callback has finished. Single use.
+  rpc FinishSignIn(FinishSignInRequest) returns (FinishSignInResponse);
+  // Signed in. Ends the calling session.
+  rpc SignOut(SignOutRequest) returns (SignOutResponse);
+}
+
+// An unset oneof is a decode error, never a state.
+message StartSignInRequest {
+  oneof provider {
+    Google google = 1;
+    Microsoft microsoft = 2;
+  }
+  // Web: the callback sets the session cookie and returns to the app. Native: the client collects the session.
+  oneof client {
+    Native native = 3;
+    Web web = 4;
+  }
+}
+
+message Google {}
+
+message Microsoft {}
+
+message Native {}
+
+message Web {}
+
+message StartSignInResponse {
+  string authorize_url = 1;
+  // Empty for a web client
+  string claim = 2;
+}
+
+message FinishSignInRequest {
+  string claim = 1;
+}
+
+// An unset oneof is a decode error, never a state.
+message FinishSignInResponse {
+  oneof outcome {
+    SignedIn signed_in = 1;
+    // The user has not finished at the provider yet
+    SignInPending pending = 2;
+    // The user cancelled at the provider
+    SignInDenied denied = 3;
+    // The code exchange or the ID token check failed
+    SignInFailed failed = 4;
+    // Unknown claim, already collected, or older than 600 seconds
+    SignInExpired expired = 5;
+  }
+}
+
+message SignedIn {
+  string bearer = 1;
+}
+
+message SignInPending {}
+
+message SignInDenied {}
+
+message SignInFailed {}
+
+message SignInExpired {}
+
+message SignOutRequest {}
+
+message SignOutResponse {}
