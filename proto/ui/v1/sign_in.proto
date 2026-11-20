@@ -20,6 +20,18 @@ message SigningIn {
   SignInProvider provider = 1;
   // "Waiting for Google"
   string text = 2;
+  oneof step {
+    SignInStarting starting = 3;
+    // The web app goes to the provider's page in the same tab.
+    SignInOpen open = 4;
+  }
+}
+
+// The engine is asking the Backend for the provider's page.
+message SignInStarting {}
+
+message SignInOpen {
+  string authorize_url = 1;
 }
 
 // The sign-in did not finish; the buttons work again.

@@ -1,0 +1,16 @@
+{
+	"$schema": "../gen/schemas/desktop-schema.json",
+	"identifier": "default",
+	"description": "The app window: the engine's IPC, and opening a provider's sign-in page in the system browser",
+	"windows": ["main"],
+	"permissions": [
+		"core:default",
+		{
+			"identifier": "opener:allow-open-url",
+			"allow": [
+				{ "url": "https://accounts.google.com/*" },
+				{ "url": "https://login.microsoftonline.com/*" }
+			]
+		}
+	]
+}

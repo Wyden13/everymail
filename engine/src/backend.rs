@@ -57,7 +57,6 @@ pub enum SendAt {
 }
 
 pub enum Work {
-    SignIn(Identity),
     /// The first sync after sign-in, or again after the local data was dropped.
     Sync,
     /// Connects an account: an OAuth provider after its own sign-in page, or IMAP with the
@@ -199,6 +198,8 @@ pub enum Decision {
 
 #[derive(Debug, PartialEq)]
 pub enum Update {
+    /// The provider's sign-in page is ready to open.
+    SignInOpen(String),
     SignedIn {
         user_name: String,
         provider: Identity,
