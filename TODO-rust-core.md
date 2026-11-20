@@ -32,8 +32,9 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
 - [ ] Session state as an explicit enum (signed out, signing in, signed in, expired) with one pure transition function and tests
       Signed out, signing in and signed in exist as the session row and a sign-in state; there is no expired state and no transition function
 - [ ] One Backend client attaches the session to every call and turns an expired session into the signed-out transition
-- [ ] `ui.v1` sign-in view and intents: choose Google or Microsoft, open the provider page from `AuthService.StartSignIn` (the system browser on native, the same tab on web, where the Backend sets the cookie), then on native collect the session with `FinishSignIn` and the claim ("I've signed in" re-checks)
+- [ ] `ui.v1` sign-in view and intents: choose Google or Microsoft, open the provider page from `AuthService.StartSignIn` (the system browser on native, the same tab on web, where the Backend sets the cookie), then on native collect the session with `FinishSignIn`, the claim and the handoff
       Works against the demo Backend; the system browser is not opened and `AuthService` is not called
+- [ ] Loopback listener behind the platform adapter for native sign-in: bind 127.0.0.1 on a free port, name it in `StartSignIn`, accept one POST to `/` carrying the form field `handoff`, answer a plain page, and close when the attempt ends or is cancelled; a failed or closed listener is an explicit sign-in state. Check in Chrome, Safari and Firefox that the Backend's page may post to 127.0.0.1 without a prompt
 - [ ] Per-screen queries: each view is built from queries scoped to the current screen and selection, replacing the load of the whole replica on every input (about 52 queries and a full in-memory copy today); measure with a 50k-message replica
       Fine at sample-data size; required before a real mailbox, for speed and for the RAM limit
 - [ ] The Backend port's requests and updates defined as `api.v1` protobuf messages and generated with prost, replacing the Rust types in `engine/src/backend.rs`

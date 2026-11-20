@@ -1,13 +1,14 @@
 import { ATTEMPT_SECONDS } from "./auth";
-import type {
-	Call,
-	CookieChange,
-	CookieName,
-	Page,
-	Pages,
-	Reply,
-	Rpc,
-	RpcTable,
+import {
+	type Call,
+	type CookieChange,
+	type CookieName,
+	type Page,
+	type Pages,
+	Refused,
+	type Reply,
+	type Rpc,
+	type RpcTable,
 } from "./rpc";
 import type { Session } from "./session";
 
@@ -38,7 +39,8 @@ const status = (code: number, headers?: HeadersInit) =>
 const readCookie = (req: Request, name: CookieName) =>
 	req.headers
 		.get("cookie")
-		?.split(/;\s*/)
+		// The separator browsers send. A looser split would read a cookie whose name only looks like ours
+		?.split("; ")
 		.find((pair) => pair.startsWith(`${COOKIES[name].name}=`))
 		?.slice(COOKIES[name].name.length + 1) || undefined;
 
@@ -75,6 +77,9 @@ async function authorize(
 	};
 }
 
+const escapeHtml = (text: string) =>
+	text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 /** The callback URL carries the sign-in code: nothing may cache it or pass it on as a referrer. */
 function render(page: Page): Response {
 	const headers = new Headers({
@@ -84,6 +89,24 @@ function render(page: Page): Response {
 	if (page.kind === "text") {
 		headers.set("Content-Type", "text/plain; charset=utf-8");
 		return new Response(page.text, { status: page.status, headers });
+	}
+	if (page.kind === "post") {
+		// The one page with markup: a form that sends itself on, and may go nowhere else
+		headers.set("Content-Type", "text/html; charset=utf-8");
+		headers.set(
+			"Content-Security-Policy",
+			`default-src 'none'; script-src 'unsafe-inline'; form-action ${page.to}`,
+		);
+		const inputs = Object.entries(page.fields)
+			.map(
+				([name, value]) =>
+					`<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+			)
+			.join("");
+		return new Response(
+			`<!doctype html><meta charset="utf-8"><title>EveryMail</title><form method="post" action="${escapeHtml(page.to)}">${inputs}<button>${escapeHtml(page.label)}</button></form><script>document.forms[0].submit()</script>`,
+			{ headers },
+		);
 	}
 	headers.set("Location", page.to);
 	setCookies(headers, page.cookies);
@@ -132,6 +155,7 @@ export function handleRequest(table: RpcTable, pages: Pages, resolve: Resolve) {
 			setCookies(headers, reply.cookies);
 			return new Response(reply.body.slice(), { headers });
 		} catch (error) {
+			if (error instanceof Refused) return status(error.status);
 			console.error(error);
 			return status(500);
 		}
@@ -144,5 +168,10 @@ export function serve(
 	resolve: Resolve,
 	port: number,
 ) {
-	return Bun.serve({ port, fetch: handleRequest(table, pages, resolve) });
+	return Bun.serve({
+		port,
+		// No call carries more than a few kilobytes yet; public calls must not be made to read megabytes
+		maxRequestBodySize: 1_048_576,
+		fetch: handleRequest(table, pages, resolve),
+	});
 }

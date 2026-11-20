@@ -20,7 +20,8 @@ message StartSignInRequest {
     Google google = 1;
     Microsoft microsoft = 2;
   }
-  // Web: the callback sets the session cookie and returns to the app. Native: the client collects the session.
+  // Web: the callback sets the session cookie and returns to the app.
+  // Native: the callback sends the browser back to the app with a handoff, and the app collects the session.
   oneof client {
     Native native = 3;
     Web web = 4;
@@ -31,7 +32,22 @@ message Google {}
 
 message Microsoft {}
 
-message Native {}
+// A native sign-in finishes only on the device that ran the browser: the session is collected with the claim,
+// which only the app that started holds, plus the handoff, which only reaches the device the browser ran on.
+// An unset oneof is a decode error, never a state.
+message Native {
+  // Where the callback sends the browser. Phones add an app link here.
+  oneof return {
+    Loopback loopback = 1;
+  }
+}
+
+// The app listens on 127.0.0.1 at this port until the browser POSTs the form field `handoff` to `/`.
+// The handoff is good for 60 seconds.
+message Loopback {
+  // 1024 to 65535; anything else is refused as a bad request
+  uint32 port = 1;
+}
 
 message Web {}
 
@@ -43,6 +59,8 @@ message StartSignInResponse {
 
 message FinishSignInRequest {
   string claim = 1;
+  // What the browser brought back to the app. Empty until then: the answer is pending, denied, failed or expired, never a session
+  string handoff = 2;
 }
 
 // An unset oneof is a decode error, never a state.

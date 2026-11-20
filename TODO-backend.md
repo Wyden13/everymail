@@ -23,8 +23,11 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [x] Plain hand-written `.sql` migrations for Postgres, applied in order at startup and recorded in one table
 - [x] Sign-in with Google or Microsoft through OIDC (authorize URL, callback, ID token check); the EveryAI account is added later as another provider of the same flow
 - [x] A web sign-in is tied to the browser that started it by a cookie holding the claim; the callback refuses any other browser, with a test
-- [ ] Decide: how a native sign-in is tied to the device that started it. Today whoever starts a native sign-in holds the claim, so a sign-in link sent to someone else hands the sender that person's session once they sign in. Options: redirect to the app itself (a loopback address or an app link, with the PKCE verifier kept by the app), or a short code shown in the app that the callback page asks for
-      Must be settled before the Backend is deployed
+- [x] A native sign-in is tied to the device that ran the browser: the callback redirects to the app's loopback port with a handoff, and `FinishSignIn` releases the session only for the claim and the handoff together; tests
+- [x] A ceiling on sign-ins in progress, answered 503; test
+- [ ] Limit how fast one address can start sign-in attempts and reach the callback, once the proxy's client address can be trusted
+- [ ] Decide: whether a Microsoft user is keyed on `sub` alone or on the tenant id with it. Microsoft documents `tid` plus `oid` as the stable key across tenants
+- [ ] Test the ID token check (audience, expiry against the database clock, RS256 only) against a local key set
 - [x] User and session tables, with `AuthService` in `api.v1`
 - [x] The session is a bearer credential for native clients and an HttpOnly, Secure, SameSite cookie for web, same origin as the Backend; both resolve to the same session row
 - [x] The RPC table marks each method as authenticated or public; handlers receive an authenticated user or never run

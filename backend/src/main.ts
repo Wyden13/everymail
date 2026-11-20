@@ -1,5 +1,11 @@
 import { SQL } from "bun";
-import { finishSignIn, signInCallback, signOut, startSignIn } from "./auth";
+import {
+	finishSignIn,
+	identifyWith,
+	signInCallback,
+	signOut,
+	startSignIn,
+} from "./auth";
 import { createExecutor } from "./executor";
 import { AuthService } from "./gen/api/v1/auth_pb";
 import { HealthService } from "./gen/api/v1/health_pb";
@@ -42,7 +48,9 @@ const table = new Map([
 	publicRpc(AuthService.method.finishSignIn, finishSignIn(sql)),
 	userCookieRpc(AuthService.method.signOut, signOut(sql)),
 ]);
-const pages = new Map([["/auth/callback", signInCallback(sql, oidc)]]);
+const pages = new Map([
+	["/auth/callback", signInCallback(sql, identifyWith(oidc))],
+]);
 
 await migrate(sql);
 createExecutor(sql, LANES);

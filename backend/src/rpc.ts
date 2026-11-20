@@ -2,10 +2,11 @@ import {
 	type DescMessage,
 	type DescMethodUnary,
 	fromBinary,
+	type Message,
 	type MessageShape,
 	toBinary,
 } from "@bufbuild/protobuf";
-import { reflect } from "@bufbuild/protobuf/reflect";
+import { type ReflectMessage, reflect } from "@bufbuild/protobuf/reflect";
 import type { Session } from "./session";
 
 /** The cookies the Backend writes: the web session, and the tie between a web sign-in and the browser that started it. */
@@ -33,9 +34,21 @@ export type Rpc =
 
 export type RpcTable = ReadonlyMap<string, Rpc>;
 
+/** A call a handler turns away: 400 when no client may ask for it, 503 when the Backend has no room for it now. */
+export class Refused extends Error {
+	constructor(
+		readonly status: 400 | 503,
+		message: string,
+	) {
+		super(message);
+	}
+}
+
 /** A page a browser is sent to, such as the sign-in callback. Answered without protobuf. */
 export type Page =
 	| { kind: "redirect"; to: string; cookies?: CookieChange[] }
+	/** Sends the browser on with a POST, so what it carries never shows in an address bar or in history. */
+	| { kind: "post"; to: string; fields: Record<string, string>; label: string }
 	| { kind: "text"; status: number; text: string };
 export type Pages = ReadonlyMap<
 	string,
@@ -44,6 +57,29 @@ export type Pages = ReadonlyMap<
 
 const path = (method: DescMethodUnary) =>
 	`/${method.parent.typeName}/${method.name}`;
+
+/** Whether a oneof is unset in the message or in any message set inside it. */
+function unsetOneof(desc: DescMessage, message: Message): boolean {
+	const fields = reflect(desc, message);
+	// Reflection types the items of a list or map as unknown; the field kind checked below says they are messages
+	const inside = (desc: DescMessage, values: Iterable<unknown>) =>
+		[...(values as Iterable<ReflectMessage>)].some((value) =>
+			unsetOneof(desc, value.message),
+		);
+	return (
+		desc.oneofs.some((o) => fields.oneofCase(o) === undefined) ||
+		desc.fields.some((field) => {
+			if (!fields.isSet(field)) return false;
+			if (field.fieldKind === "message")
+				return inside(field.message, [fields.get(field)]);
+			if (field.fieldKind === "list" && field.listKind === "message")
+				return inside(field.message, fields.get(field));
+			if (field.fieldKind === "map" && field.mapKind === "message")
+				return inside(field.message, fields.get(field).values());
+			return false;
+		})
+	);
+}
 
 /** An unset oneof in a request is a decode error, never a state. */
 function decoder<
@@ -56,8 +92,7 @@ function decoder<
 ): Decode<A> {
 	return (body) => {
 		const request = fromBinary(method.input, body);
-		const fields = reflect(method.input, request);
-		if (method.input.oneofs.some((o) => fields.oneofCase(o) === undefined)) {
+		if (unsetOneof(method.input, request)) {
 			throw new Error(`unset oneof in ${method.input.typeName}`);
 		}
 		return async (...args) => {
