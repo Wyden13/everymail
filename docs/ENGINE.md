@@ -19,6 +19,7 @@ How the Rust engine works beyond the rules in [AGENTS.md](../AGENTS.md), which h
 ## Session
 
 - Desktop and mobile keep the session credential in the operating system's keychain
+- Desktop sign-in opens the provider page in the system browser and waits for it to come back on a loopback port: 127.0.0.1 only, one POST to `/` carrying `handoff` as a form field, closed when the attempt ends. The engine keeps the claim in memory and collects the session with the claim and the handoff the browser brought. This is the one local listener the engine runs
 - On a Linux setup with no keychain service the credential goes into a file only the user can read, and the app says so once
 - On web the Backend sets an HttpOnly cookie, so the credential never enters JavaScript or WASM memory
 

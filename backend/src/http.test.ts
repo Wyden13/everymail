@@ -16,6 +16,7 @@ import {
 	type Page,
 	publicRpc,
 	type ReadCookie,
+	Refused,
 	userRpc,
 } from "./rpc";
 import type { Session } from "./session";
@@ -171,11 +172,51 @@ test("a page reads the cookies by name", async () => {
 	)(
 		new Request("http://x/auth/callback", {
 			headers: {
-				Cookie: "__Host-session=s; x__Host-sign-in=no; __Host-sign-in=c",
+				// A name that only looks like ours after loose trimming is not ours
+				Cookie:
+					"__Host-session=s; x__Host-sign-in=no;\u00a0__Host-sign-in=no; __Host-sign-in=c",
 			},
 		}),
 	);
 	expect(seen).toEqual(["c", "s"]);
+});
+
+test("a call a handler refuses answers with its status", async () => {
+	const res = await handleRequest(
+		new Map([
+			publicRpc(HealthService.method.check, async () => {
+				throw new Refused(503, "no");
+			}),
+		]),
+		noPages,
+		nobody,
+	)(request());
+	expect(res.status).toBe(503);
+});
+
+test("an unset oneof inside a set message is 400 too", async () => {
+	const res = await handleRequest(
+		new Map([
+			publicRpc(AuthService.method.startSignIn, async () =>
+				create(StartSignInResponseSchema),
+			),
+		]),
+		noPages,
+		nobody,
+	)(
+		new Request("http://x/api.v1.AuthService/StartSignIn", {
+			method: "POST",
+			headers: { "Content-Type": "application/proto" },
+			body: toBinary(
+				StartSignInRequestSchema,
+				create(StartSignInRequestSchema, {
+					provider: { case: "google", value: {} },
+					client: { case: "native", value: {} },
+				}),
+			),
+		}),
+	);
+	expect(res.status).toBe(400);
 });
 
 test("a request with an unset oneof is 400", async () => {
@@ -220,6 +261,23 @@ test("a redirect page is a 303 that can set the cookie", async () => {
 	expect(res.headers.get("set-cookie")).toStartWith("__Host-session=t;");
 	expect(res.headers.get("referrer-policy")).toBe("no-referrer");
 	expect(res.headers.get("cache-control")).toBe("no-store");
+});
+
+test("a post page sends its fields on in a form, never in a URL, and may post nowhere else", async () => {
+	const res = await visit({
+		kind: "post",
+		to: "http://127.0.0.1:4100/",
+		fields: { handoff: 'h"<' },
+		label: "Return",
+	});
+	expect(res.status).toBe(200);
+	expect(res.headers.get("location")).toBeNull();
+	expect(res.headers.get("content-security-policy")).toContain(
+		"form-action http://127.0.0.1:4100/",
+	);
+	const html = await res.text();
+	expect(html).toContain('method="post" action="http://127.0.0.1:4100/"');
+	expect(html).toContain('name="handoff" value="h&#34;&#60;"');
 });
 
 test("a text page keeps its status and is plain text", async () => {

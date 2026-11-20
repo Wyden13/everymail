@@ -118,6 +118,8 @@ export async function identify(
 	const { payload } = await jwtVerify(id_token, PROVIDERS[provider].keys, {
 		audience: client.id,
 		currentDate: now,
+		algorithms: ["RS256"],
+		requiredClaims: ["exp", "iat"],
 	});
 	return checkClaims(provider, payload, nonce);
 }
