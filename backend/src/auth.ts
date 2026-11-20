@@ -7,7 +7,6 @@ import {
 	type SignOutRequest,
 	SignOutResponseSchema,
 	type StartSignInRequest,
-	type StartSignInResponse,
 	StartSignInResponseSchema,
 } from "./gen/api/v1/auth_pb";
 import {
@@ -17,7 +16,7 @@ import {
 	type OidcConfig,
 	type Provider,
 } from "./oidc";
-import type { Answer, Page } from "./rpc";
+import type { Answer, CookieChange, Page, ReadCookie } from "./rpc";
 import {
 	createSession,
 	hashToken,
@@ -27,7 +26,7 @@ import {
 } from "./session";
 
 /** How long a sign-in may take, from the authorize URL until the client collects the session. */
-const ATTEMPT_SECONDS = 600;
+export const ATTEMPT_SECONDS = 600;
 
 const text = (status: number, text: string): Page => ({
 	kind: "text",
@@ -41,17 +40,37 @@ const EXPIRED = text(
 const DENIED = text(200, "Sign-in was cancelled. You can return to EveryMail.");
 const FAILED = text(502, "Sign-in failed. Return to EveryMail and try again.");
 const SIGNED_IN = text(200, "Signed in. You can return to EveryMail.");
+const OTHER_BROWSER = text(
+	400,
+	"This sign-in was started in another browser. Start again from EveryMail.",
+);
+const FORGET_SIGN_IN: CookieChange = { name: "signIn", kind: "clear" };
+
+/** A web sign-in finishes only in the browser that started it: that browser holds the claim in a cookie.
+ * Without this, a callback URL made with someone else's account could sign a visitor in to that account.
+ * A native sign-in finishes in the system browser, which holds no cookie, and is collected with the claim instead. */
+export const startedHere = (
+	client: "native" | "web",
+	claimHash: Uint8Array,
+	cookie: string | undefined,
+) =>
+	client === "native" ||
+	(cookie !== undefined &&
+		crypto.timingSafeEqual(hashToken(cookie), Buffer.from(claimHash)));
 
 type Attempt = {
 	provider: Provider;
 	client: "native" | "web";
+	claim_hash: Uint8Array;
 	code_verifier: string;
 	nonce: string;
 	now: Date;
 };
 
 export function startSignIn(sql: SQL, oidc: OidcConfig) {
-	return async (request: StartSignInRequest): Promise<StartSignInResponse> => {
+	return async (
+		request: StartSignInRequest,
+	): Promise<Answer<typeof StartSignInResponseSchema>> => {
 		const provider = request.provider.case;
 		const client = request.client.case;
 		// The decoder already refuses an unset oneof
@@ -69,10 +88,22 @@ export function startSignIn(sql: SQL, oidc: OidcConfig) {
 			INSERT INTO sign_in_attempts (state_hash, claim_hash, provider, client, code_verifier, nonce, expires_at)
 			VALUES (${hashToken(state)}, ${hashToken(claim)}, ${provider}::sign_in_provider, ${client}::sign_in_client,
 				${verifier}, ${nonce}, now() + make_interval(secs => ${ATTEMPT_SECONDS}))`;
-		return create(StartSignInResponseSchema, {
-			authorizeUrl: authorizeUrl(oidc, provider, { state, nonce, verifier }),
-			claim,
-		});
+		const url = authorizeUrl(oidc, provider, { state, nonce, verifier });
+		// Exhaustive over the client oneof: each client gets the claim in the one place it can keep it
+		switch (client) {
+			case "native":
+				return {
+					message: create(StartSignInResponseSchema, {
+						authorizeUrl: url,
+						claim,
+					}),
+				};
+			case "web":
+				return {
+					message: create(StartSignInResponseSchema, { authorizeUrl: url }),
+					cookies: [{ name: "signIn", kind: "set", token: claim }],
+				};
+		}
 	};
 }
 
@@ -106,12 +137,14 @@ async function settle(
 
 /** GET /auth/callback, where the provider sends the browser. */
 export function signInCallback(sql: SQL, oidc: OidcConfig) {
-	return async (query: URLSearchParams): Promise<Page> => {
+	return async (query: URLSearchParams, cookie: ReadCookie): Promise<Page> => {
 		const stateHash = hashToken(query.get("state") ?? "");
 		const [attempt]: Attempt[] = await sql`
-			SELECT provider, client, code_verifier, nonce, now() AS now FROM sign_in_attempts
+			SELECT provider, client, claim_hash, code_verifier, nonce, now() AS now FROM sign_in_attempts
 			WHERE state_hash = ${stateHash} AND status = 'pending' AND expires_at > now()`;
 		if (!attempt) return EXPIRED;
+		if (!startedHere(attempt.client, attempt.claim_hash, cookie("signIn")))
+			return OTHER_BROWSER;
 
 		const outcome = await settle(oidc, attempt, query);
 		if (outcome === "denied" || outcome === "failed") {
@@ -134,7 +167,11 @@ export function signInCallback(sql: SQL, oidc: OidcConfig) {
 					WHERE state_hash = ${stateHash} AND status = 'pending' RETURNING 1`;
 				if (!taken) return EXPIRED;
 				const token = await createSession(tx, user.id);
-				return { kind: "redirect", to: "/", cookie: { kind: "set", token } };
+				return {
+					kind: "redirect",
+					to: "/",
+					cookies: [{ name: "session", kind: "set", token }, FORGET_SIGN_IN],
+				};
 			}
 			const [taken] = await tx`
 				UPDATE sign_in_attempts SET status = 'signed_in', user_id = ${user.id}
@@ -194,7 +231,7 @@ export function signOut(sql: SQL) {
 		await revokeSession(sql, session.tokenHash);
 		return {
 			message: create(SignOutResponseSchema),
-			cookie: { kind: "clear" },
+			cookies: [{ name: "session", kind: "clear" }],
 		};
 	};
 }

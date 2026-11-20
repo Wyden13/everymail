@@ -59,10 +59,10 @@ bun install
 bun run gen            # TypeScript from the .proto files
 bun run wasm           # the engine as a WASM package
 docker compose up -d   # dev Postgres with pgvector
-bun run dev:backend
+bun run dev:backend    # needs PUBLIC_ORIGIN and the Google and Microsoft sign-in client ids and secrets, see docs/BACKEND.md
 bun run dev:desktop    # Tauri app
 bun run dev:web        # same UI, engine as WASM in a Worker
-bun run check          # lint, types, clippy, tests
+bun run check          # lint, types, clippy, tests; the Backend's queue tests need the dev Postgres running
 ```
 
 - `proto/` the contract

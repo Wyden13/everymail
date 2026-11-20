@@ -5,7 +5,8 @@ package api.v1;
 // Engine to Backend. Wire: POST /api.v1.AuthService/<Method>, body application/proto.
 // The provider redirects to the Backend's GET /auth/callback, which finishes the sign-in.
 service AuthService {
-  // Public. Returns the provider page to open and the claim a native client collects the session with.
+  // Public. Returns the provider page to open. A native client also gets the claim it collects the session with.
+  // A web client gets no claim: the Backend keeps it in a cookie, so the sign-in finishes only in the browser that started it.
   rpc StartSignIn(StartSignInRequest) returns (StartSignInResponse);
   // Public, native clients only: collects the session once the callback has finished. Single use.
   rpc FinishSignIn(FinishSignInRequest) returns (FinishSignInResponse);
@@ -36,6 +37,7 @@ message Web {}
 
 message StartSignInResponse {
   string authorize_url = 1;
+  // Empty for a web client
   string claim = 2;
 }
 

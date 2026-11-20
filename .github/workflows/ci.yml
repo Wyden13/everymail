@@ -40,7 +40,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Protobuf breaking changes
         if: github.event_name == 'pull_request'
-        run: bunx buf breaking proto --against "https://github.com/${{ github.repository }}.git#branch=${{ github.base_ref }},subdir=proto"
+        # Only api.v1 crosses a wire between parts deployed apart. ui.v1 ships inside one client build, so it may change freely
+        working-directory: proto
+        run: bunx buf breaking --path api --against "https://github.com/${{ github.repository }}.git#branch=${{ github.base_ref }},subdir=proto"
       - run: bun run gen
       - run: bun run wasm
       - run: bun run check
