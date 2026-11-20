@@ -58,12 +58,14 @@ fn main() {
     let backend =
         std::env::var("EVERYMAIL_BACKEND_URL").unwrap_or_else(|_| "http://127.0.0.1:8787".into());
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
             // The local database lives in the app's data directory and survives relaunch.
             let directory = app.path().app_data_dir()?;
             std::fs::create_dir_all(&directory)?;
             let database = directory.join("replica.sqlite3");
-            // The stand-in Backend serves the engine until the real one is built.
+            // Sign-in goes to the Backend at `backend`; the stand-in serves the mail data until sync
+            // is built.
             let engine = Engine::new(
                 &backend,
                 |task| {

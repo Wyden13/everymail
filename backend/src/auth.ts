@@ -4,6 +4,9 @@ import {
 	type FinishSignInRequest,
 	type FinishSignInResponse,
 	FinishSignInResponseSchema,
+	type GetSessionRequest,
+	type GetSessionResponse,
+	GetSessionResponseSchema,
 	type SignOutRequest,
 	SignOutResponseSchema,
 	type StartSignInRequest,
@@ -111,6 +114,8 @@ export function startSignIn(sql: SQL, oidc: OidcConfig) {
 	): Promise<Answer<typeof StartSignInResponseSchema>> => {
 		const provider = request.provider.case;
 		if (!provider) throw new Error("unset oneof reached a handler");
+		if (!oidc.clients[provider])
+			throw new Refused(400, `${provider} sign-in is not configured`);
 		const client = clientOf(request);
 		const [state, claim, nonce, verifier] = [
 			randomToken(),
@@ -287,6 +292,21 @@ export function finishSignIn(sql: SQL) {
 			}
 		});
 		return create(FinishSignInResponseSchema, { outcome });
+	};
+}
+
+export function getSession(sql: SQL) {
+	return async (
+		_: GetSessionRequest,
+		session: Session,
+	): Promise<GetSessionResponse> => {
+		const [user]: { provider: Provider; email: string }[] = await sql`
+			SELECT provider::text, email FROM users WHERE id = ${session.userId}`;
+		if (!user) throw new Error("a session without a user");
+		return create(GetSessionResponseSchema, {
+			provider: { case: user.provider, value: {} },
+			email: user.email,
+		});
 	};
 }
 

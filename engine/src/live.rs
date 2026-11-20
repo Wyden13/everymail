@@ -74,8 +74,17 @@ pub enum Notice {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SignIn {
     Idle,
-    Waiting(Identity),
+    Waiting(Identity, SignInStep),
     Failed(String),
+}
+
+/// How far a sign-in the user waits on has come.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SignInStep {
+    /// The Backend is asked for the provider's page.
+    Starting,
+    /// The provider's page, for the Frontend to open.
+    Open(String),
 }
 
 /// A summary Scribe was asked for.
@@ -272,7 +281,7 @@ impl Live {
     /// Whether a request is still waited on, so its answer or failure lands.
     fn waiting(&self, request: &Request) -> bool {
         match request {
-            Request::SignIn => matches!(self.sign_in, SignIn::Waiting(_)),
+            Request::SignIn => matches!(self.sign_in, SignIn::Waiting(..)),
             Request::Summary(thread) => self.summaries.get(thread) == Some(&Summary::Reading),
             Request::Reply(thread) => self.replies.get(thread) == Some(&Generation::Writing),
             Request::DryRun => self.dry_run == DryRun::Reading,
@@ -283,6 +292,11 @@ impl Live {
     /// The part of an update that lands in memory rather than in the replica.
     pub fn apply(&mut self, update: &Update) {
         match update {
+            Update::SignInOpen(url) => {
+                if let SignIn::Waiting(provider, _) = self.sign_in {
+                    self.sign_in = SignIn::Waiting(provider, SignInStep::Open(url.clone()));
+                }
+            }
             Update::SignedIn { .. } => self.sign_in = SignIn::Idle,
             Update::ConnectRejected(reason) => self.imap = ImapCheck::Rejected(reason.clone()),
             Update::AccountAdded(_) => self.imap = ImapCheck::Idle,

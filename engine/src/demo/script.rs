@@ -25,13 +25,6 @@ const BEAT: u64 = 900;
 
 pub fn script(work: &Work, world: &World) -> Vec<(u64, Update)> {
     match work {
-        Work::SignIn(provider) => vec![(
-            1_500,
-            Update::SignedIn {
-                user_name: "Ali".into(),
-                provider: *provider,
-            },
-        )],
         Work::Connect {
             provider,
             address,
