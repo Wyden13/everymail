@@ -32,6 +32,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [ ] Limit how fast one address can start sign-in attempts and reach the callback, once the proxy's client address can be trusted
 - [ ] Decide: whether a Microsoft user is keyed on `sub` alone or on the tenant id with it. Microsoft documents `tid` plus `oid` as the stable key across tenants
 - [ ] Test the ID token check (audience, expiry against the database clock, RS256 only) against a local key set
+      Partly: `oidc.test.ts` covers the issuer, nonce and email claims through `checkClaims`, PKCE and the authorize URL; no test runs `jwtVerify` against a local key set, so audience, expiry and RS256-only are untested
 - [x] User and session tables, with `AuthService` in `api.v1`
 - [x] The session is a bearer credential for native clients and an HttpOnly, Secure, SameSite cookie for web, same origin as the Backend; both resolve to the same session row
 - [x] The RPC table marks each method as authenticated or public; handlers receive an authenticated user or never run
@@ -45,7 +46,8 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [x] Batch claim with `FOR UPDATE SKIP LOCKED` moves due jobs to running under a lease and commits before any external call; test of ordering by due time
       No transaction and no executor is held open across an external call: claim and commit, call, then record and commit
 - [x] A lease that expires returns the job to ready through the transition function, so a restart retries in-flight jobs from their start; tests with due times and leases set relative to Postgres `now()`
-- [x] Wake-up without idle polling: enqueueing signals the executor in process, and a timer sleeps until the next due time
+- [ ] Wake-up without idle polling: enqueueing signals the executor in process, and a timer sleeps until the next due time
+      Partly: the executor's `wake` and a timer set from Postgres's own clock exist (`executor.ts`, `secondsUntilNext` tested), but `enqueue` does not signal the executor and `main.ts` discards its handle, so nothing wakes it after an enqueue
       The timer delay is computed by Postgres (due time minus `now()`), not by the process clock. No `LISTEN/NOTIFY`: `Bun.sql` cannot receive it, so it is added only if the executor becomes a separate process
 - [x] Lanes in one registry in code: per job kind a concurrency cap, retry policy and timeout; test that a full agent lane does not stop a send from being claimed
 - [x] Retry policy as a pure backoff function; a timeout counts as a failed attempt; an exhausted job becomes failed; tests
@@ -319,6 +321,7 @@ Agents only: files and sheets an agent is pointed at. There is no file browser
 
 - [ ] Waitlist table holding the fields of the landing form, unique per email
 - [ ] Public RPC that adds a signup; it is the single call a client other than the engine makes
+      Contract only: `proto/api/v1/waitlist.proto` defines `WaitlistService.Join`; there is no handler, no table and no entry in the RPC table in `main.ts`
 - [ ] Rate limiting on the public RPC as a pure function over request counts per client address and a fixed window passed in; tests at, below and over the limit
 
 ## Deployment and measurement
