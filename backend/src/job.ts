@@ -110,6 +110,8 @@ export type Lane = {
 	concurrency: number;
 	timeoutSeconds: number;
 	retry: RetryPolicy;
+	/** Agent run lanes: a finished job's outcome is written to the run log as the job is deleted. */
+	log: boolean;
 	run: (job: Job, signal: AbortSignal) => Promise<Outcome>;
 };
 
