@@ -263,7 +263,7 @@ test("a redirect page is a 303 that can set the cookie", async () => {
 	expect(res.headers.get("cache-control")).toBe("no-store");
 });
 
-test("a post page sends its fields on in a form, never in a URL, and may post nowhere else", async () => {
+test("a post page sends its fields on in a form, never in a URL, may post nowhere else, and names only its origin", async () => {
 	const res = await visit({
 		kind: "post",
 		to: "http://127.0.0.1:4100/",
@@ -275,6 +275,7 @@ test("a post page sends its fields on in a form, never in a URL, and may post no
 	expect(res.headers.get("content-security-policy")).toContain(
 		"form-action http://127.0.0.1:4100/",
 	);
+	expect(res.headers.get("referrer-policy")).toBe("origin");
 	const html = await res.text();
 	expect(html).toContain('method="post" action="http://127.0.0.1:4100/"');
 	expect(html).toContain('name="handoff" value="h&#34;&#60;"');

@@ -2,7 +2,18 @@
 //! tasks on a multi-threaded runtime, so tasks, sinks, callbacks and what they share must be `Send`;
 //! the browser has one thread. The clock, the timer, HTTP and the device's keyboard come from the
 //! host. Bodies are served by a custom URI scheme on desktop and by the Frontend's Service Worker
-//! on web.
+//! on web. Native sign-in returns to a loopback listener; web has none, as the Backend sets its
+//! session cookie.
+
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "only its tests call it until the native sign-in in TODO-rust-core.md does"
+    )
+)]
+pub mod loopback;
 
 use std::{future::Future, pin::Pin, sync::Arc};
 
