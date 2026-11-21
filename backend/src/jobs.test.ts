@@ -17,9 +17,11 @@ const lanes: Lanes = {
 		concurrency: 2,
 		timeoutSeconds: 30,
 		retry: { maxAttempts: 2, baseSeconds: 10, capSeconds: 60 },
+		log: true,
 		run: async () => "succeed",
 	},
 };
+const logged = { log: true };
 let userId: string;
 
 beforeAll(async () => {
@@ -39,6 +41,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
 	await sql`DELETE FROM jobs`;
+	await sql`DELETE FROM run_log`;
 });
 
 const add = (dueInSeconds: number, payload = new Uint8Array()) =>
@@ -46,6 +49,9 @@ const add = (dueInSeconds: number, payload = new Uint8Array()) =>
 
 const statusOf = async (id: string) =>
 	(await sql`SELECT status FROM jobs WHERE id = ${id}`)[0]?.status;
+
+const logOf = (id: string) =>
+	sql`SELECT outcome, attempt, payload FROM run_log WHERE id = ${id}`;
 
 test("claims due jobs only, oldest due first, then by id, up to the limit", async () => {
 	const late = await add(-5);
@@ -87,6 +93,7 @@ test("an expired lease returns the job to ready, then fails it once attempts run
 	expect(again?.attempt).toBe(2);
 	await expireLeases(sql, lanes);
 	expect(await statusOf(id)).toBeUndefined();
+	expect((await logOf(id))[0]).toMatchObject({ outcome: "failed", attempt: 2 });
 });
 
 test("a lease still running is left alone", async () => {
@@ -102,17 +109,44 @@ test("a finish from an older attempt changes nothing", async () => {
 	await expireLeases(sql, lanes);
 	const [current] = await claim(sql, "test", 1, 30);
 	if (!stale || !current) throw new Error("not claimed");
-	expect(await settle(sql, stale, { finished: "succeeded" })).toBe(false);
+	expect(await settle(sql, logged, stale, { finished: "succeeded" })).toBe(
+		false,
+	);
 	expect(await statusOf(id)).toBe("running");
-	expect(await settle(sql, current, { finished: "succeeded" })).toBe(true);
+	expect(await logOf(id)).toEqual([]);
+	expect(await settle(sql, logged, current, { finished: "succeeded" })).toBe(
+		true,
+	);
 	expect(await statusOf(id)).toBeUndefined();
+});
+
+test("a finish deletes the job and logs its outcome and payload under the job's id", async () => {
+	const id = await add(0, new Uint8Array([7]));
+	const [job] = await claim(sql, "test", 1, 30);
+	if (!job) throw new Error("not claimed");
+	expect(await settle(sql, logged, job, { finished: "succeeded" })).toBe(true);
+	expect(await statusOf(id)).toBeUndefined();
+	const [row] = await logOf(id);
+	expect(row).toMatchObject({ outcome: "succeeded", attempt: 1 });
+	expect([...row.payload]).toEqual([7]);
+});
+
+test("a lane that does not log deletes the job and writes nothing", async () => {
+	const id = await add(0);
+	const [job] = await claim(sql, "test", 1, 30);
+	if (!job) throw new Error("not claimed");
+	expect(
+		await settle(sql, { log: false }, job, { finished: "cancelled" }),
+	).toBe(true);
+	expect(await statusOf(id)).toBeUndefined();
+	expect(await logOf(id)).toEqual([]);
 });
 
 test("a retried attempt is scheduled after its backoff", async () => {
 	const id = await add(0);
 	const [job] = await claim(sql, "test", 1, 30);
 	if (!job) throw new Error("not claimed");
-	await settle(sql, job, { status: "scheduled" }, 3600);
+	await settle(sql, logged, job, { status: "scheduled" }, 3600);
 	expect(await statusOf(id)).toBe("scheduled");
 	expect(await claim(sql, "test", 1, 30)).toEqual([]);
 });
