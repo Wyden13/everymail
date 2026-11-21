@@ -2,6 +2,7 @@ import type { SQL } from "bun";
 import {
 	failure,
 	type Job,
+	type Lane,
 	type Lanes,
 	type Status,
 	sources,
@@ -67,9 +68,11 @@ export async function claim(
 }
 
 /** Records how a claimed attempt ended. Applies only while that attempt still holds the job,
- * so a finish arriving after its lease expired changes nothing. Returns whether it applied. */
+ * so a finish arriving after its lease expired changes nothing. Returns whether it applied.
+ * A finish deletes the job and, for a logged lane, writes the run log row in the same statement. */
 export async function settle(
 	sql: SQL,
+	lane: Pick<Lane, "log">,
 	job: { id: string; attempt: number },
 	target: Target,
 	dueInSeconds = 0,
@@ -77,9 +80,16 @@ export async function settle(
 	const rows =
 		"finished" in target
 			? await sql`
-				DELETE FROM jobs
-				WHERE id = ${job.id} AND attempt = ${job.attempt} AND status = ${RUNNING}::job_status
-				RETURNING 1`
+				WITH done AS (
+					DELETE FROM jobs
+					WHERE id = ${job.id} AND attempt = ${job.attempt} AND status = ${RUNNING}::job_status
+					RETURNING id, user_id, kind, attempt, payload
+				), logged AS (
+					INSERT INTO run_log (id, user_id, kind, outcome, attempt, payload)
+					SELECT id, user_id, kind, ${target.finished}::run_outcome, attempt, payload
+					FROM done WHERE ${lane.log}
+				)
+				SELECT 1 FROM done`
 			: await sql`
 				UPDATE jobs SET status = ${target.status}::job_status, lease_until = NULL,
 					due_at = now() + make_interval(secs => ${dueInSeconds})
@@ -101,7 +111,7 @@ export async function expireLeases(sql: SQL, lanes: Lanes): Promise<void> {
 			failure(lane.retry, row.attempt, "expire"),
 		);
 		if (!target) throw new Error("running refused a lease expiry");
-		await settle(sql, row, target);
+		await settle(sql, lane, row, target);
 	}
 }
 
