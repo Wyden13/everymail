@@ -40,7 +40,6 @@ pub type Link = std::sync::Arc<dyn Replica>;
 /// Work in flight the user waits on, which the Backend answers or fails, and the user may stop.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
-    SignIn,
     Summary(String),
     Reply(String),
     DryRun,
@@ -198,8 +197,6 @@ pub enum Decision {
 
 #[derive(Debug, PartialEq)]
 pub enum Update {
-    /// The provider's sign-in page is ready to open.
-    SignInOpen(String),
     SignedIn {
         user_name: String,
         provider: Identity,

@@ -71,7 +71,7 @@ export async function claim(
 /** Records how a claimed attempt ended. Applies only while that attempt still holds the job,
  * so a finish arriving after its lease expired changes nothing. Returns whether it applied.
  * A finish deletes the job and, in the same statement, writes the run log row for a logged lane,
- * or the failed_jobs row with its reason when a lane that does not log failed. */
+ * with the reason when it failed. */
 export async function settle(
 	sql: SQL,
 	lane: Pick<Lane, "log">,
@@ -93,13 +93,10 @@ export async function settle(
 					WHERE id = ${job.id} AND attempt = ${job.attempt} AND status = ${RUNNING}::job_status
 					RETURNING id, user_id, kind, attempt, payload
 				), logged AS (
-					INSERT INTO run_log (id, user_id, kind, outcome, attempt, payload)
-					SELECT id, user_id, kind, ${target.finished}::run_outcome, attempt, payload
+					INSERT INTO run_log (id, user_id, kind, outcome, failure_reason, attempt, payload)
+					SELECT id, user_id, kind, ${target.finished}::run_outcome,
+						${failed ? reason : null}::failure_reason, attempt, payload
 					FROM done WHERE ${lane.log}
-				), kept AS (
-					INSERT INTO failed_jobs (id, user_id, kind, reason, attempt, payload)
-					SELECT id, user_id, kind, ${reason ?? null}::failure_reason, attempt, payload
-					FROM done WHERE ${failed && !lane.log}
 				)
 				SELECT 1 FROM done`
 			: await sql`

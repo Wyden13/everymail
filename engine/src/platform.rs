@@ -2,7 +2,11 @@
 //! tasks on a multi-threaded runtime, so tasks, sinks, callbacks and what they share must be `Send`;
 //! the browser has one thread. The clock, the timer, HTTP and the device's keyboard come from the
 //! host. Bodies are served by a custom URI scheme on desktop and by the Frontend's Service Worker
-//! on web.
+//! on web. Native sign-in opens the system browser and returns to a loopback listener, and keeps
+//! the session in the keychain; web returns in the same tab, and the Backend sets its cookie.
+
+#[cfg(not(target_arch = "wasm32"))]
+mod loopback;
 
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -94,9 +98,9 @@ pub fn body_url(message_id: &str, theme: crate::proto::ui::v1::Theme) -> String 
     format!("{origin}{}", crate::body::request(message_id, theme))
 }
 
-/// POSTs protobuf bytes, with the session's bearer token when there is one, and returns the
-/// response body of a 200 answer; anything else is `None`.
-pub async fn post(url: &str, body: Vec<u8>, bearer: Option<&str>) -> Option<Vec<u8>> {
+/// POSTs protobuf bytes, with a session's bearer token when given, and returns the response body
+/// of a 200 answer; otherwise the status of another answer, or `None` when none came.
+pub async fn post(url: &str, body: Vec<u8>, bearer: Option<&str>) -> Result<Vec<u8>, Option<u16>> {
     let request = reqwest::Client::new()
         .post(url)
         .header(reqwest::header::CONTENT_TYPE, "application/proto")
@@ -105,252 +109,99 @@ pub async fn post(url: &str, body: Vec<u8>, bearer: Option<&str>) -> Option<Vec<
         Some(token) => request.bearer_auth(token),
         None => request,
     };
-    let response = request
-        .send()
-        .await
-        .ok()
-        .filter(|r| r.status() == reqwest::StatusCode::OK)?;
-    response.bytes().await.ok().map(|b| b.to_vec())
+    let response = request.send().await.map_err(|_| None)?;
+    if response.status() != reqwest::StatusCode::OK {
+        return Err(Some(response.status().as_u16()));
+    }
+    response.bytes().await.map(|b| b.to_vec()).map_err(|_| None)
 }
 
-/// Where the provider's page sends the browser back to once the user has signed in.
-pub enum Return {
-    /// The web app: the page opens in this tab, and the Backend keeps the session in a cookie.
-    #[cfg_attr(
-        not(target_arch = "wasm32"),
-        allow(dead_code, reason = "native returns through the loopback")
-    )]
-    SameTab,
-    /// Desktop: the browser posts the handoff to this device's loopback.
-    #[cfg_attr(
-        target_arch = "wasm32",
-        allow(dead_code, reason = "the browser returns in the same tab")
-    )]
-    Loopback(Listener),
+/// A handoff the browser posted to the loopback: a secret, so it has no `Debug` and leaves only
+/// through `into_string`.
+pub struct Handoff(String);
+
+impl Handoff {
+    pub fn into_string(self) -> String {
+        self.0
+    }
 }
 
-/// How this target finishes a sign-in, or `None` when it cannot listen for it.
-#[cfg(target_arch = "wasm32")]
-pub fn sign_in_return() -> Option<Return> {
-    Some(Return::SameTab)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn sign_in_return() -> Option<Return> {
-    loopback::bind().map(Return::Loopback)
-}
-
-/// What the sign-in listener heard before it stopped.
+/// How a wait on the loopback finishes.
 #[cfg_attr(
     target_arch = "wasm32",
-    allow(dead_code, reason = "the browser runs no listener")
+    expect(dead_code, reason = "web returns in the same tab")
 )]
-pub enum Heard {
-    Handoff(String),
-    /// The attempt outlived the Backend's 600 seconds.
-    Expired,
+pub enum Wait {
+    /// A well-formed handoff arrived. If the Backend does not accept it, wait again on the listener.
+    Candidate(Handoff, Loopback),
+    /// The `End` was dropped.
+    Ended,
+    /// The attempt's lifetime passed.
+    TimedOut,
+    /// The OS stopped accepting connections, for example out of file descriptors.
+    Failed,
+}
+
+/// How a sign-in comes back from the provider's page.
+pub enum Return {
+    /// Web: the page opens in this tab, and the Backend sets the session cookie.
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        expect(dead_code, reason = "native returns to the loopback")
+    )]
+    SameTab,
+    /// Native: the system browser posts the handoff to this loopback; dropping the `End` stops it.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        expect(dead_code, reason = "web returns in the same tab")
+    )]
+    Loopback(Bound, End),
+}
+
+/// How this target takes a sign-in back: the same tab on web; natively the loopback, bound for a
+/// page of the Backend's `origin`, or `None` without one or when it cannot be bound.
+pub async fn sign_in_return(origin: Option<&str>) -> Option<Return> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let (bound, end) = loopback::bind(origin?.into()).await.ok()?;
+        Some(Return::Loopback(bound, end))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = origin;
+        Some(Return::SameTab)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use loopback::Listener;
+pub use loopback::{Bound, End, Loopback};
 
-/// The browser never runs a listener.
+/// Web binds no loopback, so none of these exist there. `Loopback`'s field is private so that,
+/// outside this module, a call returning one does not read as the end of reachable code.
 #[cfg(target_arch = "wasm32")]
-pub enum Listener {}
+pub enum Bound {}
+#[cfg(target_arch = "wasm32")]
+pub struct Loopback(std::convert::Infallible);
+#[cfg(target_arch = "wasm32")]
+pub enum End {}
 
 #[cfg(target_arch = "wasm32")]
-impl Listener {
+impl Bound {
     pub fn port(&self) -> u16 {
         match *self {}
     }
-
-    pub fn serve(self, _: impl Fn() -> bool + 'static, _: impl FnOnce(Heard) + 'static) {
+    pub fn open_page(&self, _: &str) -> bool {
+        match *self {}
+    }
+    pub fn listen(self, _: std::time::Duration) -> Loopback {
         match self {}
     }
 }
 
-/// The one local server the engine runs: 127.0.0.1 only, for one sign-in attempt, until the
-/// browser posts the handoff to `/`.
-#[cfg(not(target_arch = "wasm32"))]
-mod loopback {
-    use std::{
-        io::{Read, Write},
-        net::{TcpListener, TcpStream},
-        time::{Duration, Instant},
-    };
-
-    use super::Heard;
-
-    /// The Backend's attempt life.
-    const ATTEMPT: Duration = Duration::from_secs(600);
-    const POLL: Duration = Duration::from_millis(100);
-    /// A request carrying a handoff is far smaller than this.
-    const MAX_REQUEST: usize = 8 * 1024;
-
-    pub struct Listener(TcpListener);
-
-    pub fn bind() -> Option<Listener> {
-        let listener = TcpListener::bind("127.0.0.1:0").ok()?;
-        listener.set_nonblocking(true).ok()?;
-        Some(Listener(listener))
-    }
-
-    impl Listener {
-        pub fn port(&self) -> u16 {
-            self.0.local_addr().map_or(0, |address| address.port())
-        }
-
-        /// Listens on its own thread until it hears the handoff or the attempt expires, and
-        /// tells `heard`; stops without a word once `keep_going` is false.
-        pub fn serve(
-            self,
-            keep_going: impl Fn() -> bool + Send + 'static,
-            heard: impl FnOnce(Heard) + Send + 'static,
-        ) {
-            std::thread::spawn(move || {
-                let until = Instant::now() + ATTEMPT;
-                while keep_going() {
-                    if Instant::now() >= until {
-                        return heard(Heard::Expired);
-                    }
-                    match self.0.accept() {
-                        Ok((stream, _)) => {
-                            if let Some(handoff) = answer(stream) {
-                                return heard(Heard::Handoff(handoff));
-                            }
-                        }
-                        Err(_) => std::thread::sleep(POLL),
-                    }
-                }
-            });
-        }
-    }
-
-    /// Reads one request and answers it: the handoff, or `None` for anything else.
-    fn answer(mut stream: TcpStream) -> Option<String> {
-        stream.set_nonblocking(false).ok()?;
-        stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
-        let mut request = Vec::new();
-        let mut chunk = [0; 1024];
-        let parsed = loop {
-            match parse(&request) {
-                Parsed::Incomplete if request.len() < MAX_REQUEST => {}
-                Parsed::Incomplete => break Parsed::Refused,
-                done => break done,
-            }
-            match stream.read(&mut chunk) {
-                Ok(0) | Err(_) => break Parsed::Refused,
-                Ok(n) => request.extend_from_slice(&chunk[..n]),
-            }
-        };
-        let (status, text, handoff) = match parsed {
-            Parsed::Handoff(handoff) => (
-                "200 OK",
-                "Signed in. You can return to EveryMail.",
-                Some(handoff),
-            ),
-            Parsed::Incomplete | Parsed::Refused => {
-                ("400 Bad Request", "This is not an EveryMail sign-in.", None)
-            }
-        };
-        // The browser that brought a handoff has delivered it whether or not it reads the answer.
-        let _ = write!(
-            stream,
-            "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
-            text.len()
-        );
-        handoff
-    }
-
-    #[derive(Debug, PartialEq, Eq)]
-    enum Parsed {
-        Incomplete,
-        Handoff(String),
-        Refused,
-    }
-
-    /// One request as read so far: complete only once the body its `Content-Length` names is in.
-    /// Only `POST /` with a form body whose `handoff` is base64url is a handoff.
-    fn parse(request: &[u8]) -> Parsed {
-        let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
-            return Parsed::Incomplete;
-        };
-        let Ok(head) = std::str::from_utf8(&request[..end]) else {
-            return Parsed::Refused;
-        };
-        let mut lines = head.split("\r\n");
-        if !lines
-            .next()
-            .is_some_and(|line| line.starts_with("POST / HTTP/1."))
-        {
-            return Parsed::Refused;
-        }
-        let Some(length) = lines
-            .filter_map(|line| line.split_once(':'))
-            .find(|(name, _)| name.trim().eq_ignore_ascii_case("content-length"))
-            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
-        else {
-            return Parsed::Refused;
-        };
-        let body = &request[end + 4..];
-        if body.len() < length {
-            return Parsed::Incomplete;
-        }
-        std::str::from_utf8(&body[..length])
-            .ok()
-            .and_then(|form| {
-                form.split('&')
-                    .find_map(|pair| pair.strip_prefix("handoff="))
-            })
-            .filter(|handoff| {
-                !handoff.is_empty()
-                    && handoff
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-            })
-            .map_or(Parsed::Refused, |handoff| Parsed::Handoff(handoff.into()))
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::{Parsed, parse};
-
-        fn post(path: &str, body: &str) -> Vec<u8> {
-            format!(
-                "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/x-www-form-urlencoded\r\ncontent-length: {}\r\n\r\n{body}",
-                body.len()
-            )
-            .into_bytes()
-        }
-
-        #[test]
-        fn only_a_form_post_to_the_root_with_a_base64url_handoff_is_heard() {
-            assert_eq!(
-                parse(&post("/", "handoff=aB3-_x")),
-                Parsed::Handoff("aB3-_x".into())
-            );
-            assert_eq!(
-                parse(&post("/", "other=1&handoff=abc")),
-                Parsed::Handoff("abc".into())
-            );
-            for refused in [
-                post("/favicon.ico", "handoff=abc"),
-                post("/", "handoff="),
-                post("/", "handoff=a%2Bb"),
-                post("/", "claim=abc"),
-                b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_vec(),
-                b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\nhandoff=abc".to_vec(),
-            ] {
-                assert_eq!(parse(&refused), Parsed::Refused);
-            }
-        }
-
-        #[test]
-        fn a_request_is_read_until_its_body_is_in() {
-            let whole = post("/", "handoff=abc");
-            assert_eq!(parse(&whole[..10]), Parsed::Incomplete);
-            assert_eq!(parse(&whole[..whole.len() - 1]), Parsed::Incomplete);
-        }
+#[cfg(target_arch = "wasm32")]
+impl Loopback {
+    pub async fn wait(self) -> Wait {
+        match self.0 {}
     }
 }
 

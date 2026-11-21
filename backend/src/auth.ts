@@ -139,7 +139,10 @@ export function startSignIn(sql: SQL, oidc: OidcConfig) {
 		switch (client.kind) {
 			case "web":
 				return {
-					message: create(StartSignInResponseSchema, { authorizeUrl: url }),
+					message: create(StartSignInResponseSchema, {
+						authorizeUrl: url,
+						expiresInSeconds: ATTEMPT_SECONDS,
+					}),
 					cookies: [{ name: "signIn", kind: "set", token: claim }],
 				};
 			case "native":
@@ -147,6 +150,7 @@ export function startSignIn(sql: SQL, oidc: OidcConfig) {
 					message: create(StartSignInResponseSchema, {
 						authorizeUrl: url,
 						claim,
+						expiresInSeconds: ATTEMPT_SECONDS,
 					}),
 				};
 		}
@@ -261,7 +265,11 @@ export function finishSignIn(sql: SQL) {
 		const outcome = await sql.begin(async (tx): Promise<Outcome> => {
 			// A finished attempt is collected once. A signed-in one is collected only with its handoff:
 			// until the app has it, the attempt stays and answers pending, like one the user has not finished
-			const [row]: { status: string; user_id: string | null }[] = await tx`
+			const [row]: {
+				status: string;
+				user_id: string | null;
+				email: string | null;
+			}[] = await tx`
 				WITH collected AS (
 					DELETE FROM sign_in_attempts
 					WHERE claim_hash = ${claimHash} AND client = 'native' AND expires_at > now()
@@ -269,17 +277,21 @@ export function finishSignIn(sql: SQL) {
 							OR (status = 'signed_in' AND handoff_hash = ${handoffHash}))
 					RETURNING status::text, user_id
 				)
-				SELECT status, user_id FROM collected
+				SELECT status, user_id, email FROM collected LEFT JOIN users ON users.id = user_id
 				UNION ALL
-				SELECT 'pending', NULL FROM sign_in_attempts
+				SELECT 'pending', NULL, NULL FROM sign_in_attempts
 				WHERE claim_hash = ${claimHash} AND client = 'native' AND expires_at > now()
 					AND NOT EXISTS (SELECT 1 FROM collected)`;
 			switch (row?.status) {
 				case "signed_in":
-					if (!row.user_id) throw new Error("signed_in without a user");
+					if (!row.user_id || row.email === null)
+						throw new Error("signed_in without a user");
 					return {
 						case: "signedIn",
-						value: { bearer: await createSession(tx, row.user_id) },
+						value: {
+							bearer: await createSession(tx, row.user_id),
+							email: row.email,
+						},
 					};
 				case "pending":
 					return { case: "pending", value: {} };

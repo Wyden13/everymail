@@ -41,7 +41,6 @@ afterAll(async () => {
 beforeEach(async () => {
 	await sql`DELETE FROM jobs`;
 	await sql`DELETE FROM run_log`;
-	await sql`DELETE FROM failed_jobs`;
 });
 
 const add = (dueInSeconds: number, payload = new Uint8Array()) =>
@@ -51,10 +50,7 @@ const statusOf = async (id: string) =>
 	(await sql`SELECT status FROM jobs WHERE id = ${id}`)[0]?.status;
 
 const logOf = (id: string) =>
-	sql`SELECT outcome, attempt, payload FROM run_log WHERE id = ${id}`;
-
-const failedOf = (id: string) =>
-	sql`SELECT kind, reason, attempt, payload FROM failed_jobs WHERE id = ${id}`;
+	sql`SELECT kind, outcome, failure_reason, attempt, payload FROM run_log WHERE id = ${id}`;
 
 const unlogged = { log: false };
 
@@ -98,25 +94,10 @@ test("an expired lease returns the job to ready, then fails it once attempts run
 	expect(again?.attempt).toBe(2);
 	await expireLeases(sql, lanes);
 	expect(await statusOf(id)).toBeUndefined();
-	expect((await logOf(id))[0]).toMatchObject({ outcome: "failed", attempt: 2 });
-	expect(await failedOf(id)).toEqual([]);
-});
-
-test("a lane that does not log keeps a job whose lease ran out for good as timed out", async () => {
-	const id = await add(0);
-	const once = {
-		test: {
-			...lane,
-			log: false,
-			retry: { ...lane.retry, maxAttempts: 1 },
-		},
-	};
-	await claim(sql, "test", 1, -1);
-	await expireLeases(sql, once);
-	expect(await statusOf(id)).toBeUndefined();
-	expect((await failedOf(id))[0]).toMatchObject({
-		reason: "timed_out",
-		attempt: 1,
+	expect((await logOf(id))[0]).toMatchObject({
+		outcome: "failed",
+		failure_reason: "timed_out",
+		attempt: 2,
 	});
 });
 
@@ -151,40 +132,39 @@ test("a finish deletes the job and logs its outcome and payload under the job's 
 	expect(await settle(sql, logged, job, { finished: "succeeded" })).toBe(true);
 	expect(await statusOf(id)).toBeUndefined();
 	const [row] = await logOf(id);
-	expect(row).toMatchObject({ outcome: "succeeded", attempt: 1 });
+	expect(row).toMatchObject({
+		kind: "test",
+		outcome: "succeeded",
+		failure_reason: null,
+		attempt: 1,
+	});
 	expect([...row.payload]).toEqual([7]);
 });
 
-test("a lane that does not log deletes a succeeded or cancelled job and writes nothing", async () => {
-	for (const finished of ["succeeded", "cancelled"] as const) {
-		const id = await add(0);
-		const [job] = await claim(sql, "test", 1, 30);
-		if (!job) throw new Error("not claimed");
-		expect(await settle(sql, unlogged, job, { finished })).toBe(true);
-		expect(await statusOf(id)).toBeUndefined();
-		expect(await logOf(id)).toEqual([]);
-		expect(await failedOf(id)).toEqual([]);
-	}
-});
-
-test("a lane that does not log keeps a failed job under its id with its reason", async () => {
-	const id = await add(0, new Uint8Array([9]));
+test("a failed run is logged with its reason", async () => {
+	const id = await add(0);
 	const [job] = await claim(sql, "test", 1, 30);
 	if (!job) throw new Error("not claimed");
 	expect(
-		await settle(
-			sql,
-			unlogged,
-			job,
-			{ finished: "failed" },
-			{ reason: "threw" },
-		),
+		await settle(sql, logged, job, { finished: "failed" }, { reason: "threw" }),
 	).toBe(true);
-	expect(await statusOf(id)).toBeUndefined();
-	expect(await logOf(id)).toEqual([]);
-	const [row] = await failedOf(id);
-	expect(row).toMatchObject({ kind: "test", reason: "threw", attempt: 1 });
-	expect([...row.payload]).toEqual([9]);
+	expect((await logOf(id))[0]).toMatchObject({
+		outcome: "failed",
+		failure_reason: "threw",
+	});
+});
+
+test("a lane that does not log deletes its finished job and writes nothing", async () => {
+	for (const finished of ["succeeded", "failed", "cancelled"] as const) {
+		const id = await add(0);
+		const [job] = await claim(sql, "test", 1, 30);
+		if (!job) throw new Error("not claimed");
+		expect(
+			await settle(sql, unlogged, job, { finished }, { reason: "threw" }),
+		).toBe(true);
+		expect(await statusOf(id)).toBeUndefined();
+		expect(await logOf(id)).toEqual([]);
+	}
 });
 
 test("a failure without a reason is refused and leaves the job running", async () => {

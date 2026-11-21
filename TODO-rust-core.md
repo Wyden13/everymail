@@ -26,8 +26,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
 - [ ] On Linux without a keychain service the credential goes into a file only the user can read; test that the file is created with owner-only permissions
 - [ ] Credential storage notice as an explicit enum (none, file fallback not yet told, told) persisted by the engine and sent in the shell view, so the app says so once
 - [x] rusqlite (bundled) added with the first local table; the database is not encrypted and no secret is stored in it
-- [x] Hand-written SQLite migrations applied in order at engine start and recorded in one table; the drift check lives in TODO-backend: generated drift check in CI
-      Recorded in `user_version`, not in a table
+- [x] Hand-written SQLite migrations applied in order at engine start and recorded in SQLite's `user_version`; the drift check lives in TODO-backend: generated drift check in CI
 - [ ] SQLite on disk on desktop and mobile holds metadata and thread structure for all mail and body text for the last 90 days
       On disk on desktop with every row, bodies included; there is no 90-day body window
 - [ ] Session state as an explicit enum (signed out, signing in, signed in, expired) with one pure transition function and tests
@@ -35,9 +34,12 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
 - [ ] One Backend client attaches the session to every call and turns an expired session into the signed-out transition
       `AuthService` calls carry the bearer; nothing turns a 401 into signed out yet
 - [x] `ui.v1` sign-in view and intents: choose Google or Microsoft, open the provider page from `AuthService.StartSignIn` (the system browser on native, the same tab on web, where the Backend sets the cookie), then on native collect the session with `FinishSignIn`, the claim and the handoff
-      Mail is still the demo's sample after sign-in
-- [ ] A provider step the user cancelled or that failed never reaches the loopback, so desktop waits until Cancel: poll `FinishSignIn` with the claim alone while listening, which already answers denied or failed
-- [x] Loopback listener behind the platform adapter for native sign-in: bind 127.0.0.1 on a free port, name it in `StartSignIn`, accept one POST to `/` carrying the form field `handoff`, answer a plain page, and close when the attempt ends or is cancelled; a failed or closed listener is an explicit sign-in state. Check in Chrome, Safari and Firefox that the Backend's page may post to 127.0.0.1 without a prompt
+      Each attempt has its own number and only its own answers land; a session collected for a cancelled attempt, or refused by the keychain, is signed out at the Backend. Not yet: a cancelled or failed provider step on desktop (below), the Linux file fallback, mobile, and an https Backend from desktop (the TLS task above). Mail is still the demo's sample after sign-in
+- [ ] A provider step the user cancelled or that failed never reaches the loopback, so desktop waits until Cancel or the attempt's lifetime: poll `FinishSignIn` with the claim alone while listening, which already answers denied or failed
+- [ ] Keychain calls (load at launch, save, forget) block inside async tasks; move them off the runtime's threads
+- [x] Loopback listener behind the platform adapter for native sign-in: bind 127.0.0.1 on a free port, name it in `StartSignIn`, accept one POST to `/` carrying the form field `handoff`, answer a plain page, and close when the attempt ends or is cancelled; a failed or closed listener is an explicit sign-in state
+      In `engine/src/platform/loopback.rs`, desktop only (mobile returns through an app link, not built): takes only the Backend page's post, without ending on anything else; a candidate the Backend answers pending with is a guess, and the wait goes on for the lifetime `StartSignIn` names
+- [ ] Check by hand in current Chrome, Safari and Firefox, from the Backend on https: the callback page posts to 127.0.0.1 with no permission prompt (Chrome and Firefox Local Network Access), no insecure-form warning and no HTTPS-only block, and the post carries the Backend's `Origin`. Safari's "Warn before connecting to a website over HTTP" is reported to block http loopback sign-in callbacks; if it blocks this one, add a "Decide:" task for the way back on Safari
 - [ ] Per-screen queries: each view is built from queries scoped to the current screen and selection, replacing the load of the whole replica on every input (about 52 queries and a full in-memory copy today); measure with a 50k-message replica
       Fine at sample-data size; required before a real mailbox, for speed and for the RAM limit
 - [ ] The Backend port's requests and updates defined as `api.v1` protobuf messages and generated with prost, replacing the Rust types in `engine/src/backend.rs`
@@ -54,7 +56,8 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
       Picking, signing in, the IMAP form with its rejection and syncing with messages, percent and search exist; no folder count and no failed state for a provider's sign-in
 - [ ] Open the provider sign-in page in the system browser through the platform adapter, and finish connect when the Backend confirms it ("I've signed in" re-checks)
       'I've signed in' finishes against the demo Backend; the provider's page is not opened in the system browser
-- [x] IMAP server, user and app password passed once to the Backend, never stored by the engine
+- [ ] IMAP server, user and app password passed once to the Backend, never stored by the engine
+      The engine keeps none of it and hands it to the Backend port (`Work::Connect`); only the demo Backend takes it, no real Backend call exists, and the server and port are checked but not passed
 - [ ] Stream reader for TODO-backend: `SyncService.Stream` behind the platform adapter (native streaming on desktop, fetch streams on WASM), decoding length-prefixed frames
 - [ ] Frame decoding tests: a frame split across reads, several frames in one read, a heartbeat, a truncated stream
 - [ ] Stream connection as an explicit enum (connecting, streaming, waiting to reconnect with backoff) with one pure transition function; reconnect opens with the last cursor; tests of the backoff
@@ -115,7 +118,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
 - [ ] Intents for undo send, send later (wall time plus IANA zone, or an instant), and edit or cancel a scheduled send, sent to TODO-backend: `MailService.Send`
       Undo send, send later (day and minute, no zone) and cancel exist against the demo Backend; `MailService.Send` is not built and a scheduled send cannot be edited
 - [ ] Attachments: on desktop the engine reads the picked file by path so the bytes never enter the JS heap, then uploads per TODO-backend: attachment upload
-- [x] Key state in the shell view as a `oneof` (no key, key set); with no key, summaries, AI compose and user agents are off while system agents run their code stage only
+- [ ] Key state in the shell view as a `oneof` (no key, key set); with no key, summaries, AI compose and user agents are off while system agents run their code stage only
       As oneofs in the views that depend on it (summary, reply panel, chat, Models), not one field of the shell view
 - [ ] AI compose view: model choice, quick replies, tone, instruction, and generation as a `oneof` (empty, writing, draft ready, failed) with the draft as paragraphs; calls TODO-backend: `ComposeService.Write`
       Works against the demo Backend; `ComposeService.Write` is not built
@@ -203,6 +206,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
 - [ ] No connection on web is an explicit state in the shell view, since there is no replica to read from; web has no offline queue, so an action taken without a connection fails at once with an engine-sent failed state
       A failed connection is an explicit shell state; the engine does not refuse an action taken without one
 - [ ] Session on web is the HttpOnly cookie the Backend sets: requests go same-origin with credentials and the credential never enters WASM memory
+      The engine holds no credential on web (`credential::load` is `None`) and sign-in returns in the same tab; no request sets credentials explicitly and the cookie is untested
 - [ ] Service Worker message protocol: messages between the engine Worker and the Service Worker that carry bytes only, keyed by the same message and attachment ids as the desktop scheme
       The Service Worker asks the page for bodies by message id; attachments are not served
 

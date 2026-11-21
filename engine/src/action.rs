@@ -7,7 +7,7 @@ use crate::{
     builder,
     date::Date,
     live::{
-        self, DryRun, Export, Field, Generation, ImapCheck, Live, SignIn, SignInStep, Target, Undo,
+        self, Attempt, DryRun, Export, Field, Generation, ImapCheck, Live, SignIn, Target, Undo,
     },
     navigation::{self, ConnectStep, Disclosure, Navigation, PaneChoice, Route, Screen, Selection},
     proto::ui::v1::{Form, MailProvider, ModelProvider, PermissionLevel},
@@ -169,7 +169,9 @@ pub struct Effects {
 /// Sign-in and sign-out, which the engine carries out with `AuthService` itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Auth {
-    SignIn(Identity),
+    SignIn(Attempt, Identity),
+    /// The user stopped waiting for the sign-in.
+    Cancel,
     SignOut,
 }
 
@@ -483,12 +485,14 @@ impl Context<'_> {
         let now = self.now;
         match action {
             Action::SignIn(provider) => {
-                if !matches!(self.live.sign_in, SignIn::Waiting(..)) {
-                    self.live.sign_in = SignIn::Waiting(provider, SignInStep::Starting);
-                    fx.auth = Some(Auth::SignIn(provider));
+                if let Some(attempt) = self.live.start_sign_in(provider) {
+                    fx.auth = Some(Auth::SignIn(attempt, provider));
                 }
             }
-            Action::CancelSignIn => self.cancel(Request::SignIn, &mut fx),
+            Action::CancelSignIn => {
+                self.live.sign_in = SignIn::Idle;
+                fx.auth = Some(Auth::Cancel);
+            }
             Action::SignOut => {
                 s.sign_out()?;
                 self.live.clear();

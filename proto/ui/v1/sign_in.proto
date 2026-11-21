@@ -22,13 +22,17 @@ message SigningIn {
   string text = 2;
   oneof step {
     SignInStarting starting = 3;
-    // The web app goes to the provider's page in the same tab.
+    // Web only: the web app goes to the provider's page in the same tab.
     SignInOpen open = 4;
+    // Desktop: the engine opened the provider's page in the system browser and waits for it to return.
+    SignInBrowser browser = 5;
   }
 }
 
 // The engine is asking the Backend for the provider's page.
 message SignInStarting {}
+
+message SignInBrowser {}
 
 message SignInOpen {
   string authorize_url = 1;

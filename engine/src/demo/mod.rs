@@ -257,7 +257,6 @@ fn reported(action: &Action, world: &World) -> Vec<Fired> {
 /// What the user is told when the Backend gives up on a request.
 fn timed_out(request: &Request) -> &'static str {
     match request {
-        Request::SignIn => "The sign-in did not finish in time. Try again",
         Request::Summary(_) => "Scribe did not answer in time",
         Request::Reply(_) => "The model did not answer in time",
         Request::DryRun => "The dry run did not finish in time",

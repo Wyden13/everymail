@@ -93,6 +93,10 @@ function render(page: Page): Response {
 	if (page.kind === "post") {
 		// The one page with markup: a form that sends itself on, and may go nowhere else
 		headers.set("Content-Type", "text/html; charset=utf-8");
+		// The form's Origin is how the app's listener tells this page from any other. Under no-referrer
+		// (and under strict-origin, https to http) a browser sends `Origin: null`; `origin` sends the
+		// origin alone, so the callback's code still reaches no Referer
+		headers.set("Referrer-Policy", "origin");
 		headers.set(
 			"Content-Security-Policy",
 			`default-src 'none'; script-src 'unsafe-inline'; form-action ${page.to}`,

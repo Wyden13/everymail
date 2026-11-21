@@ -24,15 +24,10 @@ function requireEnv(name: string): string {
 	return value;
 }
 
-/** A provider's client when its id is set; without one, signing in with that provider is refused. */
-function client(prefix: string) {
-	return process.env[`${prefix}_CLIENT_ID`]
-		? {
-				id: requireEnv(`${prefix}_CLIENT_ID`),
-				secret: requireEnv(`${prefix}_CLIENT_SECRET`),
-			}
-		: undefined;
-}
+const client = (prefix: string) => ({
+	id: requireEnv(`${prefix}_CLIENT_ID`),
+	secret: requireEnv(`${prefix}_CLIENT_SECRET`),
+});
 
 const sql = new SQL(requireEnv("DATABASE_URL"), {
 	max: 3,
@@ -41,7 +36,13 @@ const sql = new SQL(requireEnv("DATABASE_URL"), {
 
 const oidc: OidcConfig = {
 	redirectUri: `${requireEnv("PUBLIC_ORIGIN")}/auth/callback`,
-	clients: { google: client("GOOGLE"), microsoft: client("MICROSOFT") },
+	// Google is required; Microsoft is offered only once its client id is set
+	clients: {
+		google: client("GOOGLE"),
+		microsoft: process.env.MICROSOFT_CLIENT_ID
+			? client("MICROSOFT")
+			: undefined,
+	},
 };
 
 const table = new Map([

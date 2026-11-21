@@ -1,6 +1,6 @@
 import "./sign-in.css";
 import { useEffect } from "react";
-import { match, useEngine } from "../engine";
+import { match, useSend } from "../engine";
 import { SignInProvider } from "../gen/ui/v1/common_pb";
 import type { SignInView } from "../gen/ui/v1/sign_in_pb";
 import { Button } from "../ui/Button";
@@ -10,19 +10,20 @@ import { stagger } from "../ui/stagger";
 
 const providers = [
 	{ provider: SignInProvider.GOOGLE, label: "Continue with Google" },
-	// { provider: SignInProvider.MICROSOFT, label: "Continue with Microsoft" },
+	{ provider: SignInProvider.MICROSOFT, label: "Continue with Microsoft" },
 ];
 
 // The two ways in. While the engine signs in with one, its button says what it waits for, both are
-// disabled and Cancel stops waiting; a sign-in that did not finish says why under them. Once the
-// engine has the provider's page, it opens: in the system browser on desktop, in this tab on web.
+// disabled and Cancel stops waiting; a sign-in that did not finish says why under them. On web the
+// engine's Worker cannot navigate, so the provider's page it names opens here, in this tab; desktop's
+// engine opens it in the system browser itself.
 export function SignIn({ view }: { view: SignInView }) {
-	const { send, openPage } = useEngine();
+	const send = useSend();
 	const { state } = view;
 	const page = providerPage(state);
 	useEffect(() => {
-		if (page) openPage(page);
-	}, [page, openPage]);
+		if (page) location.assign(page);
+	}, [page]);
 	return (
 		<div className="sign-in">
 			<div className="sign-in-hero settle" style={stagger(0)}>
@@ -94,6 +95,7 @@ const providerPage = (state: SignInView["state"]) =>
 			match(signing.step, "SigningIn.step", {
 				starting: () => undefined,
 				open: (open) => open.authorizeUrl,
+				browser: () => undefined,
 			}),
 	});
 

@@ -6,7 +6,6 @@
 
 import { create, type MessageInitShape, toBinary } from "@bufbuild/protobuf";
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { createContext, useContext } from "react";
 import { HistoryStep, IntentSchema } from "./gen/ui/v1/shell_pb";
 
@@ -25,9 +24,6 @@ export type Engine = {
 	// Service Worker's response carries `Content-Security-Policy: sandbox allow-scripts` instead,
 	// which gives the body the same opaque origin with scripts only.
 	bodySandbox: "allow-scripts" | undefined;
-	// Opens the provider's sign-in page. Tauri: the system browser, which returns to the engine's
-	// loopback. Web: this tab, which the Backend sends back to the app.
-	openPage(url: string): void;
 };
 
 const encode = (intent: IntentKind) =>
@@ -43,9 +39,6 @@ function connectTauri(onView: (bytes: Uint8Array) => void): Engine {
 		},
 		showPath: () => {},
 		bodySandbox: "allow-scripts",
-		openPage: (url) => {
-			openUrl(url).catch(reportError);
-		},
 	};
 }
 
@@ -99,7 +92,6 @@ function connectWeb(onView: (bytes: Uint8Array) => void): Engine {
 			}
 		},
 		bodySandbox: undefined,
-		openPage: (url) => location.assign(url),
 	};
 }
 

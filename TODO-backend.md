@@ -25,9 +25,14 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [x] A web sign-in is tied to the browser that started it by a cookie holding the claim; the callback refuses any other browser, with a test
 - [x] A native sign-in is tied to the device that ran the browser: the callback redirects to the app's loopback port with a handoff, and `FinishSignIn` releases the session only for the claim and the handoff together; tests
 - [x] A ceiling on sign-ins in progress, answered 503; test
+- [x] `StartSignIn` names how long the attempt lives, so a native app listens no longer, and a native `FinishSignIn` names the user's email with the session, so the app needs no second call; tests
+- [x] `GetSession` names the provider and email of the calling session's user: how the web app, which never holds its cookie, learns it is signed in; test
+- [x] Google's sign-in client is required to start and Microsoft's is optional; `StartSignIn` with a provider that has no client answers 400 and records no attempt; test
+- [ ] `AuthService` names the providers it offers, so the sign-in screen shows only those instead of failing on one that is not configured
 - [ ] Limit how fast one address can start sign-in attempts and reach the callback, once the proxy's client address can be trusted
 - [ ] Decide: whether a Microsoft user is keyed on `sub` alone or on the tenant id with it. Microsoft documents `tid` plus `oid` as the stable key across tenants
 - [ ] Test the ID token check (audience, expiry against the database clock, RS256 only) against a local key set
+      Partly: `oidc.test.ts` covers the issuer, nonce and email claims through `checkClaims`, PKCE and the authorize URL; no test runs `jwtVerify` against a local key set, so audience, expiry and RS256-only are untested
 - [x] User and session tables, with `AuthService` in `api.v1`
 - [x] The session is a bearer credential for native clients and an HttpOnly, Secure, SameSite cookie for web, same origin as the Backend; both resolve to the same session row
 - [x] The RPC table marks each method as authenticated or public; handlers receive an authenticated user or never run
@@ -41,13 +46,15 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [x] Batch claim with `FOR UPDATE SKIP LOCKED` moves due jobs to running under a lease and commits before any external call; test of ordering by due time
       No transaction and no executor is held open across an external call: claim and commit, call, then record and commit
 - [x] A lease that expires returns the job to ready through the transition function, so a restart retries in-flight jobs from their start; tests with due times and leases set relative to Postgres `now()`
-- [x] Wake-up without idle polling: enqueueing signals the executor in process, and a timer sleeps until the next due time
+- [ ] Wake-up without idle polling: enqueueing signals the executor in process, and a timer sleeps until the next due time
+      Partly: the executor's `wake` and a timer set from Postgres's own clock exist (`executor.ts`, `secondsUntilNext` tested), but `enqueue` does not signal the executor and `main.ts` discards its handle, so nothing wakes it after an enqueue
       The timer delay is computed by Postgres (due time minus `now()`), not by the process clock. No `LISTEN/NOTIFY`: `Bun.sql` cannot receive it, so it is added only if the executor becomes a separate process
 - [x] Lanes in one registry in code: per job kind a concurrency cap, retry policy and timeout; test that a full agent lane does not stop a send from being claimed
 - [x] Retry policy as a pure backoff function; a timeout counts as a failed attempt; an exhausted job becomes failed; tests
 - [x] Run log table for agent runs; a finished job is deleted in the same transaction that writes its outcome to the run log
-- [x] A job of another kind that fails for good is kept in `failed_jobs` under its id, with a reason (`failure_reason` enum: timed out, threw; each lane adds its own), written by the same statement that deletes it
-- [ ] Retention cleanup job: run log and failed jobs rows older than 90 days and transcripts older than 30 days are deleted, except the transcript of a parked run until it resolves; test of the cutoff function
+      Written by the statement that deletes the job; a failed run carries its reason (`failure_reason` enum: timed out, threw; each lane adds its own), and a lane that does not log writes nothing
+- [ ] A job of another kind that exhausts its retries is shown on what it concerns: a fetch or token job sets the account status, a send job sets the message's send state, each with a reason
+- [ ] Retention cleanup job: run log rows older than 90 days and transcripts older than 30 days are deleted, except the transcript of a parked run until it resolves; test of the cutoff function
 - [ ] Fair claiming across users (round robin over users with ready jobs) and a per-user cap on running jobs, with a priority per lane deciding which lane goes first under that shared cap; tests of fairness and ordering with one user holding a large backlog
 - [x] Executor interface inside the Backend process: take a claimed job, return an outcome, hold nothing between jobs; one in-process implementation, so a separate process can replace it later
 - [x] Postgres `now()` is the only source of "now": CI lint bans `Date.now()` and `new Date()` without arguments in the Backend
@@ -314,6 +321,7 @@ Agents only: files and sheets an agent is pointed at. There is no file browser
 
 - [ ] Waitlist table holding the fields of the landing form, unique per email
 - [ ] Public RPC that adds a signup; it is the single call a client other than the engine makes
+      Contract only: `proto/api/v1/waitlist.proto` defines `WaitlistService.Join`; there is no handler, no table and no entry in the RPC table in `main.ts`
 - [ ] Rate limiting on the public RPC as a pure function over request counts per client address and a fixed window passed in; tests at, below and over the limit
 
 ## Deployment and measurement

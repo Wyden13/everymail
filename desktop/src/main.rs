@@ -58,7 +58,6 @@ fn main() {
     let backend =
         std::env::var("EVERYMAIL_BACKEND_URL").unwrap_or_else(|_| "http://127.0.0.1:8787".into());
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
             // The local database lives in the app's data directory and survives relaunch.
             let directory = app.path().app_data_dir()?;
