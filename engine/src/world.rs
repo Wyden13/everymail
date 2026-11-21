@@ -547,6 +547,15 @@ pub enum Identity {
     Microsoft,
 }
 
+impl Identity {
+    pub fn name(self) -> &'static str {
+        match self {
+            Identity::Google => "Google",
+            Identity::Microsoft => "Microsoft",
+        }
+    }
+}
+
 /// Whether model work runs, as the Backend says: summaries, AI compose and the user's agents are
 /// off without a key.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

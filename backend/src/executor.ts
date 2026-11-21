@@ -48,18 +48,27 @@ export function createExecutor(sql: SQL, lanes: Lanes): Executor {
 			console.error(
 				`job ${job.id} ${job.kind}: attempt ${job.attempt} failed: ${error instanceof Error ? error.message : "thrown"}`,
 			);
-			outcome = "fail";
+			outcome = { fail: signal.aborted ? "timed_out" : "threw" };
 		}
 		count(job.kind, -1);
 		const event =
-			outcome === "fail" ? failure(lane.retry, job.attempt, "fail") : outcome;
+			typeof outcome === "string"
+				? outcome
+				: failure(lane.retry, job.attempt, "fail");
 		const target = transition("running", event);
 		if (!target) throw new Error(`running refused ${event}`);
 		await settle(
 			sql,
+			lane,
 			job,
 			target,
-			event === "fail" ? backoffSeconds(lane.retry, job.attempt) : 0,
+			typeof outcome === "string"
+				? {}
+				: {
+						reason: outcome.fail,
+						dueInSeconds:
+							event === "fail" ? backoffSeconds(lane.retry, job.attempt) : 0,
+					},
 		);
 	}
 

@@ -5,6 +5,7 @@ use crate::{
     action::{Action, ComposeKind, EventToSave, MoveTo},
     backend::Update,
     connection,
+    live::{Attempt, SignInAnswer},
     navigation::{self, Disclosure, Listing, Mailbox, Route},
     preferences::Preference,
     proto::ui::v1::{
@@ -38,6 +39,8 @@ pub enum Input {
     Preference(Preference),
     Action(Action),
     Update(Update),
+    /// The engine's own sign-in, about one attempt.
+    SignIn(Attempt, SignInAnswer),
     /// The timer went off: outcomes and notices run out.
     Tick,
 }

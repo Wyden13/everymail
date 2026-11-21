@@ -65,8 +65,6 @@ struct Jobs {
 enum Job {
     /// The Backend started: pick up runs a closed app left.
     Start,
-    /// The first sync after sign-in.
-    Sync,
     Work(Work),
     Report(Action),
     /// The timer went off.
@@ -176,7 +174,6 @@ fn play(
 /// dropped. The final answer ends the wait.
 fn answers(jobs: &Mutex<Jobs>, update: &Update) -> bool {
     let (request, last) = match update {
-        Update::SignedIn { .. } | Update::Snapshot(_) => (Request::SignIn, true),
         Update::Reply { thread, .. } => (Request::Reply(thread.clone()), true),
         Update::DryRun(_) => (Request::DryRun, true),
         Update::ExportProgress(_) => (Request::Export, false),
@@ -222,7 +219,6 @@ fn handle(shared: &Arc<Mutex<Jobs>>, replica: &Link, job: Job) {
     };
     match job {
         Job::Start => cx.start(),
-        Job::Sync => cx.sync(),
         Job::Work(work) => cx.work(work),
         Job::Report(action) => {
             if let Some(world) = cx.world() {
@@ -261,7 +257,6 @@ fn reported(action: &Action, world: &World) -> Vec<Fired> {
 /// What the user is told when the Backend gives up on a request.
 fn timed_out(request: &Request) -> &'static str {
     match request {
-        Request::SignIn => "The sign-in did not finish in time. Try again",
         Request::Summary(_) => "Scribe did not answer in time",
         Request::Reply(_) => "The model did not answer in time",
         Request::DryRun => "The dry run did not finish in time",
@@ -380,12 +375,6 @@ impl Cx<'_> {
         match work {
             Work::Run(agent) => self.wake(Wake::new(&agent, Cause::RunNow)),
             Work::Chat { agent, turn } => self.wake(Wake::new(&agent, Cause::Message(turn))),
-            Work::SignIn(provider) => {
-                self.wait_on(Request::SignIn, now);
-                let mut steps = updates(script::script(&Work::SignIn(provider), &world));
-                steps.push_back((0, Step::Then(Job::Sync)));
-                self.play(None, steps);
-            }
             Work::Sync => self.sync(),
             Work::Connect { .. } => {
                 let mut steps = updates(script::script(&work, &world));

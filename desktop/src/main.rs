@@ -63,7 +63,8 @@ fn main() {
             let directory = app.path().app_data_dir()?;
             std::fs::create_dir_all(&directory)?;
             let database = directory.join("replica.sqlite3");
-            // The stand-in Backend serves the engine until the real one is built.
+            // Sign-in goes to the Backend at `backend`; the stand-in serves the mail data until sync
+            // is built.
             let engine = Engine::new(
                 &backend,
                 |task| {

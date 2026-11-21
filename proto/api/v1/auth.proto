@@ -10,6 +10,8 @@ service AuthService {
   rpc StartSignIn(StartSignInRequest) returns (StartSignInResponse);
   // Public, native clients only: collects the session once the callback has finished. Single use.
   rpc FinishSignIn(FinishSignInRequest) returns (FinishSignInResponse);
+  // Signed in. Who the calling session belongs to: how a web app, which never holds its session cookie, learns it is signed in.
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
   // Signed in. Ends the calling session.
   rpc SignOut(SignOutRequest) returns (SignOutResponse);
 }
@@ -55,6 +57,8 @@ message StartSignInResponse {
   string authorize_url = 1;
   // Empty for a web client
   string claim = 2;
+  // How long the attempt lives from now: a native client listens on its loopback no longer
+  uint32 expires_in_seconds = 3;
 }
 
 message FinishSignInRequest {
@@ -80,6 +84,8 @@ message FinishSignInResponse {
 
 message SignedIn {
   string bearer = 1;
+  // The user's email at the provider the attempt was started with, for display
+  string email = 2;
 }
 
 message SignInPending {}
@@ -89,6 +95,17 @@ message SignInDenied {}
 message SignInFailed {}
 
 message SignInExpired {}
+
+message GetSessionRequest {}
+
+// An unset oneof is a decode error, never a state.
+message GetSessionResponse {
+  oneof provider {
+    Google google = 1;
+    Microsoft microsoft = 2;
+  }
+  string email = 3;
+}
 
 message SignOutRequest {}
 

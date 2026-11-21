@@ -20,6 +20,22 @@ message SigningIn {
   SignInProvider provider = 1;
   // "Waiting for Google"
   string text = 2;
+  oneof step {
+    SignInStarting starting = 3;
+    // Web only: the web app goes to the provider's page in the same tab.
+    SignInOpen open = 4;
+    // Desktop: the engine opened the provider's page in the system browser and waits for it to return.
+    SignInBrowser browser = 5;
+  }
+}
+
+// The engine is asking the Backend for the provider's page.
+message SignInStarting {}
+
+message SignInBrowser {}
+
+message SignInOpen {
+  string authorize_url = 1;
 }
 
 // The sign-in did not finish; the buttons work again.

@@ -25,6 +25,10 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [x] A web sign-in is tied to the browser that started it by a cookie holding the claim; the callback refuses any other browser, with a test
 - [x] A native sign-in is tied to the device that ran the browser: the callback redirects to the app's loopback port with a handoff, and `FinishSignIn` releases the session only for the claim and the handoff together; tests
 - [x] A ceiling on sign-ins in progress, answered 503; test
+- [x] `StartSignIn` names how long the attempt lives, so a native app listens no longer, and a native `FinishSignIn` names the user's email with the session, so the app needs no second call; tests
+- [x] `GetSession` names the provider and email of the calling session's user: how the web app, which never holds its cookie, learns it is signed in; test
+- [x] Google's sign-in client is required to start and Microsoft's is optional; `StartSignIn` with a provider that has no client answers 400 and records no attempt; test
+- [ ] `AuthService` names the providers it offers, so the sign-in screen shows only those instead of failing on one that is not configured
 - [ ] Limit how fast one address can start sign-in attempts and reach the callback, once the proxy's client address can be trusted
 - [ ] Decide: whether a Microsoft user is keyed on `sub` alone or on the tenant id with it. Microsoft documents `tid` plus `oid` as the stable key across tenants
 - [ ] Test the ID token check (audience, expiry against the database clock, RS256 only) against a local key set
@@ -45,7 +49,8 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
       The timer delay is computed by Postgres (due time minus `now()`), not by the process clock. No `LISTEN/NOTIFY`: `Bun.sql` cannot receive it, so it is added only if the executor becomes a separate process
 - [x] Lanes in one registry in code: per job kind a concurrency cap, retry policy and timeout; test that a full agent lane does not stop a send from being claimed
 - [x] Retry policy as a pure backoff function; a timeout counts as a failed attempt; an exhausted job becomes failed; tests
-- [ ] Run log table for agent runs; a finished job is deleted in the same transaction that writes its outcome to the run log
+- [x] Run log table for agent runs; a finished job is deleted in the same transaction that writes its outcome to the run log
+      Written by the statement that deletes the job; a failed run carries its reason (`failure_reason` enum: timed out, threw; each lane adds its own), and a lane that does not log writes nothing
 - [ ] A job of another kind that exhausts its retries is shown on what it concerns: a fetch or token job sets the account status, a send job sets the message's send state, each with a reason
 - [ ] Retention cleanup job: run log rows older than 90 days and transcripts older than 30 days are deleted, except the transcript of a parked run until it resolves; test of the cutoff function
 - [ ] Fair claiming across users (round robin over users with ready jobs) and a per-user cap on running jobs, with a priority per lane deciding which lane goes first under that shared cap; tests of fairness and ordering with one user holding a large backlog
@@ -58,6 +63,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [ ] Missed-run policy: after downtime a schedule runs once, not once per missed slot; test in the next-run function
 - [ ] Overlap policy: if the previous run is still going when the next is due, the next is skipped; test
 - [ ] A job with a due time can be edited or cancelled until claimed, as one conditional update on status scheduled; test that an edit after the claim fails
+      Cancel deletes through the same delete-and-log statement as `settle`, so a cancelled run reaches the run log
 - [ ] Side-effect ledger: idempotency key, status enum (pending, completed, failed) and recorded result
 - [ ] One function runs every side effect through the ledger: pending row committed, call, completed row committed; a replayed completed key returns the recorded result without calling; ledger replay tests
 - [ ] Events table: user id, a per-user increasing cursor, kind, subject, cause and hop count, written only through a helper that takes the transaction of the change that caused it
@@ -163,7 +169,8 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 
 ## Agent runs
 
-- [ ] Run tables: run id, agent, cause and hop count, status as a `oneof` (running, waiting for approval, paused, done, declined, failed with a reason, stopped at a limit), and a transcript of steps (kept, drafted, archived, labelled, filed, logged, failed); retention per the cleanup job above
+- [ ] Run tables: run id (the job's id), agent, cause and hop count, status as a `oneof` (running, waiting for approval, paused, done, declined, failed with a reason, stopped at a limit), and a transcript of steps (kept, drafted, archived, labelled, filed, logged, failed); retention per the cleanup job above
+      A live run's status comes from its job row and a finished run's from the run log; neither is stored twice
 - [ ] Tool registry in code: each tool has a typed input, an action category for permissions and an executor; the model's tool list is generated from it
 - [ ] Tools offered to the model are only those whose category is not Off; a test that an Off category is absent from the list
 - [ ] The one fixed system prompt, versioned in code; the version is stored on each run
@@ -171,6 +178,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [ ] Mail content and notes are wrapped as delimited data in the prompt; the wrapper neutralizes the delimiter inside content; test with hostile content
 - [ ] "Advance run" job kind: load the transcript, make one LLM call, store the response, enqueue the tool calls; each tool result enqueues "advance run" again
 - [ ] Tool calls run as jobs through the side-effect ledger; the run's job is waiting for an event until their results are stored
+      Readying the run's job (resolve, resume) resets its attempt to 0, so the retry policy counts attempts of one turn, not the run's steps; test
 - [ ] Embedding retrieval tool: an agent finds related past mail by meaning
 - [ ] A run stops at the steps per run cap or at 600 seconds of active time (time spent waiting for approval does not count); one pure limit function, with tests
 - [ ] `finish` tool with a typed deliverable message; a reply with no tool call fails the run; prose is never parsed

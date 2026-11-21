@@ -13,11 +13,14 @@
 //! - The listener cannot tell a real handoff from a guessed one; only the Backend can. The wait
 //!   yields each candidate together with the listener, and the caller waits again when the Backend
 //!   does not accept it.
+//! - Bound first, so the port can be named in `StartSignIn`; listening for the attempt's lifetime,
+//!   which `StartSignIn` answers with, after.
 //! - One connection at a time, a bounded request and a deadline for each connection, so nothing
 //!   can make it hold memory or hang past the attempt.
 
 use std::{io, net::Ipv4Addr, time::Duration};
 
+use super::{Handoff, Wait};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpSocket},
@@ -39,39 +42,24 @@ const CONNECTION_TIME: Duration = Duration::from_secs(5);
 const BACKLOG: u32 = 16;
 const PAGE: &str = "Return to EveryMail to finish signing in.\n";
 
-/// A well-formed handoff: a secret, so it has no `Debug` and leaves only through `into_string`.
-pub struct Handoff(String);
-
-impl Handoff {
-    pub fn into_string(self) -> String {
-        self.0
-    }
-}
-
-/// Listening for one sign-in attempt. Waiting consumes it; a candidate hands it back.
-pub struct Loopback {
+/// Bound to its port for one sign-in attempt, not yet listening.
+pub struct Bound {
     listener: TcpListener,
     port: u16,
     expect: Expect,
-    ends_at: Instant,
     ended: oneshot::Receiver<()>,
+}
+
+/// Listening for one sign-in attempt until its lifetime passes. Waiting consumes it; a candidate
+/// hands it back.
+pub struct Loopback {
+    bound: Bound,
+    ends_at: Instant,
 }
 
 /// Held by whoever may end the attempt: dropping it ends the wait.
 pub struct End {
     _sender: oneshot::Sender<()>,
-}
-
-/// How a wait finishes.
-pub enum Wait {
-    /// A well-formed handoff arrived. If the Backend does not accept it, wait again on the listener.
-    Candidate(Handoff, Loopback),
-    /// The `End` was dropped.
-    Ended,
-    /// The attempt's lifetime passed.
-    TimedOut,
-    /// The OS stopped accepting connections, for example out of file descriptors.
-    Failed,
 }
 
 /// What a request must carry to be a candidate.
@@ -80,40 +68,56 @@ struct Expect {
     origin: String,
 }
 
-impl Loopback {
-    /// Binds 127.0.0.1 on a free port for an attempt that lives `lifetime`, accepting posts only
-    /// from a page of `origin` (the Backend's, as `https://host`). Async because the socket joins
-    /// the runtime the engine's tasks run on.
-    pub async fn bind(origin: String, lifetime: Duration) -> io::Result<(Loopback, End)> {
-        // A fresh socket carries no reuse option; `TcpListener::bind` would set SO_REUSEADDR on Unix
-        let socket = TcpSocket::new_v4()?;
-        socket.bind((Ipv4Addr::LOCALHOST, 0).into())?;
-        let listener = socket.listen(BACKLOG)?;
-        let port = listener.local_addr()?.port();
-        let (end, ended) = oneshot::channel();
-        let loopback = Loopback {
-            listener,
-            port,
-            expect: Expect {
-                host: format!("{}:{port}", Ipv4Addr::LOCALHOST),
-                origin,
-            },
-            ends_at: Instant::now() + lifetime,
-            ended,
-        };
-        Ok((loopback, End { _sender: end }))
-    }
+/// Binds 127.0.0.1 on a free port for one attempt, accepting posts only from a page of `origin`
+/// (the Backend's, as `https://host`). Async because the socket joins the runtime the engine's
+/// tasks run on.
+pub async fn bind(origin: String) -> io::Result<(Bound, End)> {
+    // A fresh socket carries no reuse option; `TcpListener::bind` would set SO_REUSEADDR on Unix
+    let socket = TcpSocket::new_v4()?;
+    socket.bind((Ipv4Addr::LOCALHOST, 0).into())?;
+    let listener = socket.listen(BACKLOG)?;
+    let port = listener.local_addr()?.port();
+    let (end, ended) = oneshot::channel();
+    let bound = Bound {
+        listener,
+        port,
+        expect: Expect {
+            host: format!("{}:{port}", Ipv4Addr::LOCALHOST),
+            origin,
+        },
+        ended,
+    };
+    Ok((bound, End { _sender: end }))
+}
 
+impl Bound {
     /// The port to name in `StartSignIn`.
     pub fn port(&self) -> u16 {
         self.port
     }
 
+    /// Opens the provider's page in the system browser, which returns to this port; whether it
+    /// opened.
+    pub fn open_page(&self, url: &str) -> bool {
+        open::that_detached(url).is_ok()
+    }
+
+    /// Listens for the attempt's remaining `lifetime`.
+    pub fn listen(self, lifetime: Duration) -> Loopback {
+        Loopback {
+            bound: self,
+            ends_at: Instant::now() + lifetime,
+        }
+    }
+}
+
+impl Loopback {
     /// Serves connections until one brings a candidate, the `End` is dropped or the lifetime passes.
     pub async fn wait(mut self) -> Wait {
+        let bound = &mut self.bound;
         let served = tokio::select! {
-            served = serve(&self.listener, &self.expect) => served,
-            _ = &mut self.ended => return Wait::Ended,
+            served = serve(&bound.listener, &bound.expect) => served,
+            _ = &mut bound.ended => return Wait::Ended,
             () = sleep_until(self.ends_at) => return Wait::TimedOut,
         };
         match served {
@@ -413,11 +417,9 @@ mod tests {
     #[tokio::test]
     async fn a_refused_request_leaves_the_wait_to_the_handoff_or_the_end() {
         let origin = "https://everymail.example";
-        let (loopback, end) = Loopback::bind(origin.into(), Duration::from_secs(600))
-            .await
-            .unwrap();
-        let port = loopback.port();
-        let waiting = tokio::spawn(loopback.wait());
+        let (bound, end) = bind(origin.into()).await.unwrap();
+        let port = bound.port();
+        let waiting = tokio::spawn(bound.listen(Duration::from_secs(600)).wait());
         let exchange = |request: String| async move {
             let mut stream = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port))
                 .await

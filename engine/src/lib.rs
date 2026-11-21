@@ -12,6 +12,7 @@ mod path;
 mod platform;
 mod preferences;
 mod schedule;
+mod session;
 mod store;
 mod time;
 mod view;
@@ -39,7 +40,7 @@ mod proto {
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use action::{Action, Context, selected};
-use backend::{Link, Request, Update, Work};
+use backend::{Link, Update, Work};
 use connection::Connection;
 use intent::Input;
 use live::{Field, Live, Target, Undo};
@@ -67,6 +68,16 @@ pub struct Engine(Arc<Shared>);
 
 struct Shared {
     check_url: String,
+    /// `AuthService`'s methods follow this.
+    auth_url: String,
+    /// The Backend's origin, which its sign-in page posts the handoff from.
+    origin: Option<String>,
+    /// The session's bearer token on desktop, read from the keychain at launch. The web app's
+    /// session is a cookie the engine never holds.
+    credential: Mutex<Option<String>>,
+    /// Ends the waited-on sign-in's loopback when dropped: replaced by a newer attempt, taken by a
+    /// cancel or a finished sign-in. Taken only under the state lock, after it.
+    listening: Mutex<Option<platform::End>>,
     spawn: Spawn,
     backend: Box<dyn Backend>,
     /// The new mail shortcut as this device writes it.
@@ -179,6 +190,7 @@ impl Engine {
         let now = backend.now();
         let world = store.load(now, None)?;
         let start = navigation::start(&world);
+        let signed_out = world.user.is_none();
         let navigation = match (&world.user, store.navigation_path()?) {
             (Some(_), Some(path)) => {
                 navigation::transition(&start, navigation::Event::OpenPath(path), &world)
@@ -193,6 +205,10 @@ impl Engine {
         let preferences = store.preferences()?.unwrap_or(preferences::START);
         let engine = Self(platform::shared(Shared {
             check_url: format!("{backend_url}/api.v1.HealthService/Check"),
+            auth_url: format!("{backend_url}/api.v1.AuthService/"),
+            origin: session::origin(backend_url),
+            credential: Mutex::new(None),
+            listening: Mutex::new(None),
             spawn,
             backend,
             shortcut: platform::new_mail_shortcut(),
@@ -211,6 +227,7 @@ impl Engine {
         }));
         engine.0.backend.start(engine.link());
         engine.run(effect);
+        engine.open_session(signed_out);
         Ok(engine)
     }
 
@@ -270,14 +287,24 @@ impl Engine {
     /// data and the view is built. The view goes out after the lock is released, in order, and a
     /// connection check the input starts runs after that.
     fn dispatch(&self, input: Input) -> Result<(), StoreError> {
-        let mut state = self.lock();
+        self.dispatch_locked(self.lock(), input)
+    }
+
+    /// The dispatch, under a lock the caller took to decide on the input.
+    fn dispatch_locked(
+        &self,
+        mut state: MutexGuard<'_, State>,
+        input: Input,
+    ) -> Result<(), StoreError> {
         state.now = self.0.backend.now();
         state.read = None;
         let before = navigation::route(&state.navigation);
         let mover = match &input {
             Input::Navigation(navigation::Event::OpenPath(_)) => Mover::Address,
             Input::Navigation(_) | Input::Action(_) | Input::Preference(_) => Mover::User,
-            Input::Connection(_) | Input::Update(_) | Input::Tick => Mover::Data,
+            Input::Connection(_) | Input::Update(_) | Input::SignIn(..) | Input::Tick => {
+                Mover::Data
+            }
         };
         let handled = self.handle(&mut state, input);
         let followed = self.follow(&mut state);
@@ -346,6 +373,7 @@ impl Engine {
             }
             Input::Action(action) => self.act(state, action)?,
             Input::Update(update) => self.take(state, update)?,
+            Input::SignIn(attempt, answer) => state.live.answer(attempt, answer),
             Input::Tick => {
                 state.armed = None;
                 state.live.expire(platform::wall_ms());
@@ -393,6 +421,9 @@ impl Engine {
         }
         for work in effects.work {
             self.request(work);
+        }
+        if let Some(auth) = effects.auth {
+            self.authenticate(auth);
         }
         self.navigate(state, effects.navigate)
     }
@@ -555,11 +586,7 @@ impl Engine {
                 }
                 Some(navigation::Event::Conceal(Disclosure::Budget))
             }
-            Update::Failed {
-                request: Request::SignIn,
-                ..
-            }
-            | Update::UserDeleted => Some(navigation::Event::Refresh),
+            Update::UserDeleted => Some(navigation::Event::Refresh),
             _ => None,
         };
         self.navigate(state, event)
@@ -627,7 +654,8 @@ impl Engine {
     }
 
     async fn check(&self) -> connection::Event {
-        let Some(body) = platform::post(&self.0.check_url, CheckRequest {}.encode_to_vec()).await
+        let Ok(body) =
+            platform::post(&self.0.check_url, CheckRequest {}.encode_to_vec(), None).await
         else {
             return connection::Event::BackendUnreachable;
         };
@@ -647,7 +675,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        backend::Request,
+        live::SignInAnswer,
         proto::ui::v1::{self as ui, intent::Kind},
         store::tests::{FIXTURE, NOW},
         world::Identity,
@@ -705,20 +733,38 @@ mod tests {
                 provider: ui::SignInProvider::Microsoft.into(),
             }),
         );
-        assert!(matches!(
-            backend.take().as_slice(),
-            [Work::SignIn(Identity::Microsoft)]
-        ));
-        assert_eq!(
-            engine.lock().live.sign_in,
-            live::SignIn::Waiting(Identity::Microsoft)
+        assert!(
+            backend.take().is_empty(),
+            "the engine signs in with AuthService itself"
         );
+        let waiting = |engine: &Engine| match engine.lock().live.sign_in {
+            live::SignIn::Waiting(attempt, Identity::Microsoft, live::SignInStep::Starting) => {
+                attempt
+            }
+            ref other => panic!("not waiting: {other:?}"),
+        };
+        let first = waiting(&engine);
         send(&engine, Kind::CancelSignIn(ui::CancelSignIn {}));
-        assert!(matches!(
-            backend.take().as_slice(),
-            [Work::Cancel(Request::SignIn)]
-        ));
         assert_eq!(engine.lock().live.sign_in, live::SignIn::Idle);
+        send(
+            &engine,
+            Kind::ContinueWithProvider(ui::ContinueWithProvider {
+                provider: ui::SignInProvider::Microsoft.into(),
+            }),
+        );
+        let second = waiting(&engine);
+        for stale in [
+            SignInAnswer::Step(live::SignInStep::Open("https://provider/".into())),
+            SignInAnswer::Failed("Late".into()),
+        ] {
+            engine.dispatch(Input::SignIn(first, stale)).unwrap();
+        }
+        assert_eq!(
+            waiting(&engine),
+            second,
+            "answers to the cancelled attempt change nothing"
+        );
+        assert!(backend.take().is_empty());
 
         // The Backend's answers come in as inputs too.
         for update in [

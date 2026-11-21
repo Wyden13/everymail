@@ -40,7 +40,6 @@ pub type Link = std::sync::Arc<dyn Replica>;
 /// Work in flight the user waits on, which the Backend answers or fails, and the user may stop.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
-    SignIn,
     Summary(String),
     Reply(String),
     DryRun,
@@ -57,7 +56,6 @@ pub enum SendAt {
 }
 
 pub enum Work {
-    SignIn(Identity),
     /// The first sync after sign-in, or again after the local data was dropped.
     Sync,
     /// Connects an account: an OAuth provider after its own sign-in page, or IMAP with the

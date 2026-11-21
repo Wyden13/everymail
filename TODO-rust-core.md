@@ -22,6 +22,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
 ## Session and local database
 
 - [ ] Session credential in the OS keychain on desktop and mobile (macOS, Windows, Linux Secret Service, iOS, Android) behind the platform adapter
+      Desktop is done through the `keyring` crate (macOS, Windows, Linux Secret Service); iOS and Android are not
 - [ ] On Linux without a keychain service the credential goes into a file only the user can read; test that the file is created with owner-only permissions
 - [ ] Credential storage notice as an explicit enum (none, file fallback not yet told, told) persisted by the engine and sent in the shell view, so the app says so once
 - [x] rusqlite (bundled) added with the first local table; the database is not encrypted and no secret is stored in it
@@ -32,10 +33,13 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic.
 - [ ] Session state as an explicit enum (signed out, signing in, signed in, expired) with one pure transition function and tests
       Signed out, signing in and signed in exist as the session row and a sign-in state; there is no expired state and no transition function
 - [ ] One Backend client attaches the session to every call and turns an expired session into the signed-out transition
-- [ ] `ui.v1` sign-in view and intents: choose Google or Microsoft, open the provider page from `AuthService.StartSignIn` (the system browser on native, the same tab on web, where the Backend sets the cookie), then on native collect the session with `FinishSignIn`, the claim and the handoff
-      Works against the demo Backend; the system browser is not opened and `AuthService` is not called
-- [ ] Loopback listener behind the platform adapter for native sign-in: bind 127.0.0.1 on a free port, name it in `StartSignIn`, accept one POST to `/` carrying the form field `handoff`, answer a plain page, and close when the attempt ends or is cancelled; a failed or closed listener is an explicit sign-in state
-      Built and tested in `engine/src/platform/loopback.rs`, native only: binds before the port is named, refuses anything but the Backend page's post without ending, hands each candidate back with the listener, and ends on the caller, the attempt's lifetime or a failure to accept. Nothing calls it yet: naming the port, sending candidates to `FinishSignIn` and the listener's outcome as a sign-in state come with the sign-in view and the Backend client
+      `AuthService` calls carry the bearer; nothing turns a 401 into signed out yet
+- [x] `ui.v1` sign-in view and intents: choose Google or Microsoft, open the provider page from `AuthService.StartSignIn` (the system browser on native, the same tab on web, where the Backend sets the cookie), then on native collect the session with `FinishSignIn`, the claim and the handoff
+      Each attempt has its own number and only its own answers land; a session collected for a cancelled attempt, or refused by the keychain, is signed out at the Backend. Not yet: a cancelled or failed provider step on desktop (below), the Linux file fallback, mobile, and an https Backend from desktop (the TLS task above). Mail is still the demo's sample after sign-in
+- [ ] A provider step the user cancelled or that failed never reaches the loopback, so desktop waits until Cancel or the attempt's lifetime: poll `FinishSignIn` with the claim alone while listening, which already answers denied or failed
+- [ ] Keychain calls (load at launch, save, forget) block inside async tasks; move them off the runtime's threads
+- [x] Loopback listener behind the platform adapter for native sign-in: bind 127.0.0.1 on a free port, name it in `StartSignIn`, accept one POST to `/` carrying the form field `handoff`, answer a plain page, and close when the attempt ends or is cancelled; a failed or closed listener is an explicit sign-in state
+      In `engine/src/platform/loopback.rs`, desktop only (mobile returns through an app link, not built): takes only the Backend page's post, without ending on anything else; a candidate the Backend answers pending with is a guess, and the wait goes on for the lifetime `StartSignIn` names
 - [ ] Check by hand in current Chrome, Safari and Firefox, from the Backend on https: the callback page posts to 127.0.0.1 with no permission prompt (Chrome and Firefox Local Network Access), no insecure-form warning and no HTTPS-only block, and the post carries the Backend's `Origin`. Safari's "Warn before connecting to a website over HTTP" is reported to block http loopback sign-in callbacks; if it blocks this one, add a "Decide:" task for the way back on Safari
 - [ ] Per-screen queries: each view is built from queries scoped to the current screen and selection, replacing the load of the whole replica on every input (about 52 queries and a full in-memory copy today); measure with a 50k-message replica
       Fine at sample-data size; required before a real mailbox, for speed and for the RAM limit

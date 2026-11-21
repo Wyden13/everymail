@@ -177,14 +177,22 @@ fn sign_in(live: &Live) -> ui::SignInView {
     ui::SignInView {
         state: Some(match &live.sign_in {
             live::SignIn::Idle => State::Idle(ui::SignInIdle {}),
-            live::SignIn::Waiting(identity) => {
-                let (provider, name) = match identity {
-                    Identity::Google => (ui::SignInProvider::Google, "Google"),
-                    Identity::Microsoft => (ui::SignInProvider::Microsoft, "Microsoft"),
+            live::SignIn::Waiting(_, identity, step) => {
+                use ui::signing_in::Step;
+                let provider = match identity {
+                    Identity::Google => ui::SignInProvider::Google,
+                    Identity::Microsoft => ui::SignInProvider::Microsoft,
                 };
                 State::SigningIn(ui::SigningIn {
                     provider: provider.into(),
-                    text: format!("Waiting for {name}"),
+                    text: format!("Waiting for {}", identity.name()),
+                    step: Some(match step {
+                        live::SignInStep::Starting => Step::Starting(ui::SignInStarting {}),
+                        live::SignInStep::Open(url) => Step::Open(ui::SignInOpen {
+                            authorize_url: url.clone(),
+                        }),
+                        live::SignInStep::Browser => Step::Browser(ui::SignInBrowser {}),
+                    }),
                 })
             }
             live::SignIn::Failed(reason) => State::Failed(ui::SignInFailed {

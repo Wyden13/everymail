@@ -1,4 +1,5 @@
 import "./sign-in.css";
+import { useEffect } from "react";
 import { match, useSend } from "../engine";
 import { SignInProvider } from "../gen/ui/v1/common_pb";
 import type { SignInView } from "../gen/ui/v1/sign_in_pb";
@@ -13,10 +14,16 @@ const providers = [
 ];
 
 // The two ways in. While the engine signs in with one, its button says what it waits for, both are
-// disabled and Cancel stops waiting; a sign-in that did not finish says why under them.
+// disabled and Cancel stops waiting; a sign-in that did not finish says why under them. On web the
+// engine's Worker cannot navigate, so the provider's page it names opens here, in this tab; desktop's
+// engine opens it in the system browser itself.
 export function SignIn({ view }: { view: SignInView }) {
 	const send = useSend();
 	const { state } = view;
+	const page = providerPage(state);
+	useEffect(() => {
+		if (page) location.assign(page);
+	}, [page]);
 	return (
 		<div className="sign-in">
 			<div className="sign-in-hero settle" style={stagger(0)}>
@@ -78,6 +85,18 @@ const signingIn = (state: SignInView["state"]) =>
 		idle: () => false,
 		failed: () => false,
 		signingIn: () => true,
+	});
+
+const providerPage = (state: SignInView["state"]) =>
+	match(state, "SignInView.state", {
+		idle: () => undefined,
+		failed: () => undefined,
+		signingIn: (signing) =>
+			match(signing.step, "SigningIn.step", {
+				starting: () => undefined,
+				open: (open) => open.authorizeUrl,
+				browser: () => undefined,
+			}),
 	});
 
 const signingWith = (state: SignInView["state"], provider: SignInProvider) =>

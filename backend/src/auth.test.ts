@@ -3,6 +3,7 @@ import { create } from "@bufbuild/protobuf";
 import { SQL } from "bun";
 import {
 	finishSignIn,
+	getSession,
 	type Identify,
 	signInCallback,
 	startedHere,
@@ -10,6 +11,7 @@ import {
 } from "./auth";
 import {
 	FinishSignInRequestSchema,
+	GetSessionRequestSchema,
 	StartSignInRequestSchema,
 } from "./gen/api/v1/auth_pb";
 import { migrate } from "./migrate";
@@ -78,6 +80,7 @@ afterAll(async () => {
 test("a native client gets the claim, a web client gets it only as a cookie", async () => {
 	const app = await start(native(4100));
 	expect(app.message.claim).not.toBe("");
+	expect(app.message.expiresInSeconds).toBe(600);
 	expect(app.cookies).toBeUndefined();
 
 	const web = await start(
@@ -109,8 +112,43 @@ test("the session is collected once, and only with the claim and the handoff tog
 
 	const outcome = await collect(claim, "handoff");
 	if (outcome.case !== "signedIn") throw new Error(`got ${outcome.case}`);
+	expect(outcome.value.email).toBe("a@b.c");
 	expect(await resolveSession(sql, outcome.value.bearer)).toBeDefined();
 	expect((await collect(claim, "handoff")).case).toBe("expired");
+});
+
+test("a session names its own user's provider and email", async () => {
+	const [user] = await sql`
+		INSERT INTO users (provider, subject, email) VALUES ('microsoft', 'own', 'own@b.c') RETURNING id`;
+	await sql`
+		INSERT INTO users (provider, subject, email) VALUES ('google', 'other', 'other@b.c')`;
+	const session = await getSession(sql)(create(GetSessionRequestSchema), {
+		userId: user.id,
+		tokenHash: hashToken("own"),
+	});
+	expect([session.provider.case, session.email]).toEqual([
+		"microsoft",
+		"own@b.c",
+	]);
+});
+
+test("a provider without a client is refused with 400 and records no attempt", async () => {
+	const googleOnly = startSignIn(sql, {
+		redirectUri: oidc.redirectUri,
+		clients: { google: oidc.clients.google },
+	});
+	const attempts = async () =>
+		(await sql`SELECT count(*)::int AS n FROM sign_in_attempts`)[0].n;
+	const before = await attempts();
+	await expect(
+		googleOnly(
+			create(StartSignInRequestSchema, {
+				provider: { case: "microsoft", value: {} },
+				client: { case: "web", value: {} },
+			}),
+		),
+	).rejects.toMatchObject({ status: 400 });
+	expect(await attempts()).toBe(before);
 });
 
 test("a cancelled sign-in is reported to the claim alone, once", async () => {

@@ -74,7 +74,30 @@ pub enum Notice {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SignIn {
     Idle,
-    Waiting(Identity),
+    Waiting(Attempt, Identity, SignInStep),
+    Failed(String),
+}
+
+/// One sign-in the user started. Its answers carry it, so an answer to an earlier attempt lands
+/// nowhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Attempt(u64);
+
+/// How far a sign-in the user waits on has come.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SignInStep {
+    /// The Backend is asked for the provider's page.
+    Starting,
+    /// Web: the provider's page, for the Frontend to open in the same tab.
+    Open(String),
+    /// Desktop: the provider's page is open in the system browser, which returns to the loopback.
+    Browser,
+}
+
+/// What the engine's sign-in learns for one attempt, short of the session itself.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SignInAnswer {
+    Step(SignInStep),
     Failed(String),
 }
 
@@ -163,6 +186,8 @@ pub struct Live {
     pub outcomes: Vec<Outcome>,
     pub notice: Notice,
     pub sign_in: SignIn,
+    /// Sign-ins started, so each attempt has its own number. Kept when the rest is cleared.
+    attempts: u64,
     pub imap: ImapCheck,
     /// Summaries asked for and not written, by thread.
     pub summaries: BTreeMap<String, Summary>,
@@ -177,6 +202,7 @@ pub const START: Live = Live {
     outcomes: Vec::new(),
     notice: Notice::None,
     sign_in: SignIn::Idle,
+    attempts: 0,
     imap: ImapCheck::Idle,
     summaries: BTreeMap::new(),
     replies: BTreeMap::new(),
@@ -192,9 +218,39 @@ pub const START: Live = Live {
 impl Live {
     /// Drops everything with the data, and every typed field's text with it.
     pub fn clear(&mut self) {
-        let mut revisions = std::mem::replace(self, START).revisions;
-        revisions.revise_all();
-        self.revisions = revisions;
+        let before = std::mem::replace(self, START);
+        self.revisions = before.revisions;
+        self.revisions.revise_all();
+        self.attempts = before.attempts;
+    }
+
+    /// Starts a sign-in with `provider` unless one is waited on already; the new attempt.
+    pub fn start_sign_in(&mut self, provider: Identity) -> Option<Attempt> {
+        if matches!(self.sign_in, SignIn::Waiting(..)) {
+            return None;
+        }
+        self.attempts += 1;
+        let attempt = Attempt(self.attempts);
+        self.sign_in = SignIn::Waiting(attempt, provider, SignInStep::Starting);
+        Some(attempt)
+    }
+
+    /// Whether `attempt` is the sign-in waited on.
+    pub fn waits_on(&self, attempt: Attempt) -> bool {
+        matches!(self.sign_in, SignIn::Waiting(a, ..) if a == attempt)
+    }
+
+    /// An answer lands only while its own attempt is waited on.
+    pub fn answer(&mut self, attempt: Attempt, answer: SignInAnswer) {
+        let SignIn::Waiting(waited, provider, _) = self.sign_in else {
+            return;
+        };
+        if waited == attempt {
+            self.sign_in = match answer {
+                SignInAnswer::Step(step) => SignIn::Waiting(attempt, provider, step),
+                SignInAnswer::Failed(reason) => SignIn::Failed(reason),
+            };
+        }
     }
 
     pub fn done(&mut self, target: Target, text: &str, now_ms: i64) {
@@ -257,7 +313,6 @@ impl Live {
     /// The user stopped waiting for a request.
     pub fn cancel(&mut self, request: &Request) {
         match request {
-            Request::SignIn => self.sign_in = SignIn::Idle,
             Request::Summary(thread) => {
                 self.summaries.remove(thread);
             }
@@ -272,7 +327,6 @@ impl Live {
     /// Whether a request is still waited on, so its answer or failure lands.
     fn waiting(&self, request: &Request) -> bool {
         match request {
-            Request::SignIn => matches!(self.sign_in, SignIn::Waiting(_)),
             Request::Summary(thread) => self.summaries.get(thread) == Some(&Summary::Reading),
             Request::Reply(thread) => self.replies.get(thread) == Some(&Generation::Writing),
             Request::DryRun => self.dry_run == DryRun::Reading,
@@ -308,7 +362,6 @@ impl Live {
             Update::Failed { request, reason } if self.waiting(request) => {
                 let reason = reason.clone();
                 match request {
-                    Request::SignIn => self.sign_in = SignIn::Failed(reason),
                     Request::Summary(thread) => {
                         self.summaries
                             .insert(thread.clone(), Summary::Failed(reason));
@@ -439,5 +492,21 @@ mod tests {
             Some(&Resolution::Done("Started".into()))
         );
         assert_eq!(live.outcomes.len(), 1);
+    }
+
+    #[test]
+    fn a_sign_in_attempt_is_never_numbered_twice() {
+        let mut live = START;
+        let first = live.start_sign_in(Identity::Google).unwrap();
+        assert_eq!(
+            live.start_sign_in(Identity::Microsoft),
+            None,
+            "one at a time"
+        );
+        live.clear();
+        let second = live.start_sign_in(Identity::Google).unwrap();
+        assert_ne!(first, second, "clearing with the data keeps the count");
+        live.answer(first, SignInAnswer::Failed("Late".into()));
+        assert!(live.waits_on(second));
     }
 }
