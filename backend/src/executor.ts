@@ -57,6 +57,7 @@ export function createExecutor(sql: SQL, lanes: Lanes): Executor {
 		if (!target) throw new Error(`running refused ${event}`);
 		await settle(
 			sql,
+			lane,
 			job,
 			target,
 			event === "fail" ? backoffSeconds(lane.retry, job.attempt) : 0,
