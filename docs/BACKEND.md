@@ -45,8 +45,8 @@ Everything the Backend does on its own is a job: fetching mail, sending mail, sn
 - No transaction and no executor is held open across an external call: claim and commit, call, then record and commit
 - One mechanism, several lanes. Each job kind is a lane with its own concurrency cap, retry policy and timeout, so slow agent steps never delay a send. Within a lane, jobs are claimed by due time. Priority between lanes comes with the per-user cap, the first limit lanes share
 - Columns hold what the claim query needs; the rest of the payload is protobuf
-- A finished job is deleted; the run log is what is kept. The run log covers agent runs. It holds finished runs only, written by the same statement that deletes the job: a live run is its job row, and a run's id is its job's id. A job of another kind that keeps failing shows on the thing it concerns: the account's status or the message's send state
-- The run log is kept 90 days. The transcript, which holds mail content and model output, is deleted after 30 days; a parked run keeps its transcript until it resolves
+- A finished job is deleted; the run log is what is kept. The run log covers agent runs. It holds finished runs only, written by the same statement that deletes the job: a live run is its job row, and a run's id is its job's id. A job of another kind that fails for good is kept in a failed jobs table under its id, with a reason from an explicit enum, written by the same statement that deletes it
+- The run log and the failed jobs table are kept 90 days. The transcript, which holds mail content and model output, is deleted after 30 days; a parked run keeps its transcript until it resolves
 - The executor runs inside the Backend process, behind an interface that allows a separate process later. A restart retries in-flight jobs from their start
 - Every row carries a user id. Claiming is fair across users and capped per user, so one backlog cannot starve the rest. Sized for tens to hundreds of users on the one VM
 

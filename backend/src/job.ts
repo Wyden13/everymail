@@ -77,10 +77,12 @@ export const transition = (status: Status, event: Event): Target | undefined =>
 export const sources = (event: Event) =>
 	Object.keys(TRANSITIONS[event]) as Status[];
 
-export type Outcome = Extract<
-	Event,
-	"succeed" | "fail" | "await_approval" | "await_event"
->;
+/** Why an attempt failed. The `failure_reason` enum: each value is added here and to the enum, by migration, together. */
+export type FailureReason = "timed_out" | "threw";
+
+export type Outcome =
+	| Extract<Event, "succeed" | "await_approval" | "await_event">
+	| { fail: FailureReason };
 
 export type RetryPolicy = {
 	maxAttempts: number;
