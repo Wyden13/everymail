@@ -57,7 +57,8 @@ const pages = new Map([
 ]);
 
 await migrate(sql);
-createExecutor(sql, LANES);
+// biome-ignore lint/correctness/noUnusedVariables: handlers that enqueue a job get executor.wake, through commit in jobs.ts
+const executor = createExecutor(sql, LANES);
 const server = serve(
 	table,
 	pages,

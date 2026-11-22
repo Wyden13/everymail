@@ -1,4 +1,4 @@
-import type { SQL } from "bun";
+import type { SQL, TransactionSQL } from "bun";
 import {
 	type FailureReason,
 	failure,
@@ -16,7 +16,7 @@ const RUNNING: Status = "running";
 
 const statuses = (sql: SQL, list: Status[]) => sql.array(list, "TEXT");
 
-/** Adds a job due after a delay. Runs in the caller's transaction; the caller wakes the executor after it commits. */
+/** Adds a job due after a delay. Runs in the caller's transaction, which goes through `commit` so the executor wakes. */
 export async function enqueue(
 	sql: SQL,
 	job: {
@@ -32,6 +32,18 @@ export async function enqueue(
 			now() + make_interval(secs => ${job.dueInSeconds}), ${job.payload})
 		RETURNING id`;
 	return row.id;
+}
+
+/** Runs `work` in one transaction and wakes the executor once it commits; a rollback wakes nothing.
+ * Every write that enqueues or readies a job goes through this. */
+export async function commit<T>(
+	sql: SQL,
+	wake: () => void,
+	work: (tx: TransactionSQL) => Promise<T>,
+): Promise<T> {
+	const result = await sql.begin(work);
+	wake();
+	return result;
 }
 
 /** Moves up to `limit` due jobs of a kind to running under a lease, oldest due first, and commits.
