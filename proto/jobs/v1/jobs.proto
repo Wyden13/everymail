@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package jobs.v1;
+
+// Job payloads: Backend-internal, stored in jobs.payload and never on the wire.
+// A lane that keeps its subject names that subject here, so its final failure can be recorded on it.
+
+// Payload of the fetch and token refresh kinds.
+message AccountJob {
+  int64 account_id = 1;
+}
+
+// Payload of the send kind.
+message SendJob {
+  int64 send_id = 1;
+}
