@@ -53,8 +53,8 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [x] Retry policy as a pure backoff function; a timeout counts as a failed attempt; an exhausted job becomes failed; tests
 - [x] Run log table for agent runs; a finished job is deleted in the same transaction that writes its outcome to the run log
       Written by the statement that deletes the job; a failed run carries its reason (`failure_reason` enum: timed out, threw; each lane adds its own), and a lane that keeps its subject writes no run log
-- [ ] A job of another kind that exhausts its retries is shown on what it concerns: a fetch or token job sets the account status, a send job sets the message's send state, each with a reason
-      Partly: a lane `keeps` (`job.ts`) the run log or its subject, whose `failed` record runs with the reason in the transaction that deletes the job; a record that throws is logged and its lease pushed back, never stopping other jobs; tests; account status and send state plug in with the fetch, token and send lanes
+- [x] A job of another kind that exhausts its retries is shown on what it concerns: a fetch or token job sets the account status, a send job sets the message's send state, each with a reason
+      A lane `keeps` (`job.ts`) the run log or its subject, whose `failed` record runs with the reason in the transaction that deletes the job; a record that throws is logged and its lease pushed back, never stopping other jobs. `failsOn` (`subjects.ts`) marks the account or send named by the job's `jobs.v1` payload failed with the reason; tests
 - [ ] Retention cleanup job: run log rows older than 90 days and transcripts older than 30 days are deleted, except the transcript of a parked run until it resolves; test of the cutoff function
 - [ ] Fair claiming across users (round robin over users with ready jobs) and a per-user cap on running jobs, with a priority per lane deciding which lane goes first under that shared cap; tests of fairness and ordering with one user holding a large backlog
 - [x] Executor interface inside the Backend process: take a claimed job, return an outcome, hold nothing between jobs; one in-process implementation, so a separate process can replace it later
@@ -86,7 +86,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [ ] Microsoft OAuth for Outlook (Microsoft 365 and outlook.com), sharing the OIDC code of sign-in; open to everyone from the start
 - [ ] Start Microsoft publisher verification
 - [ ] First sign-in can connect that provider's mailbox in the same step; connecting a mail account stays a separate call
-- [ ] Token refresh as a job kind, due before expiry
+- [ ] Token refresh as a job kind, due before expiry; its lane keeps `failsOn("accounts")`
 - [ ] IMAP with password for iCloud Mail, Yahoo Mail and Fastmail (app-specific password) and Other IMAP (server and password); open to everyone from the start
 - [ ] `AccountService` in `api.v1`: start connect (returns the provider sign-in URL), finish connect, list, disconnect (purges per User data)
 - [ ] Account status as a `oneof`: syncing with progress (messages, folders), synced at a time, sign-in expired, failed with a reason
@@ -95,6 +95,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [ ] Generated drift check in CI: fails when a synced message in `api.v1` and its Postgres or SQLite tables drift apart (needs TODO-rust-core: hand-written SQLite migrations)
 - [ ] Eviction job deletes extracted text older than 90 days and never touches vectors; older bodies and all attachments are fetched from the provider on demand
 - [ ] Fetch is a job kind in its own lane: initial sync fetches newest mail first and reports progress, so the inbox opens before the backfill ends
+      Its lane keeps `failsOn("accounts")`
 - [ ] Incremental fetch per account from a stored provider cursor (Gmail history id, Graph delta link, IMAP UIDVALIDITY with MODSEQ or UID)
 - [ ] Tests of each connector's cursor-to-changes logic on recorded fixtures, including a UIDVALIDITY reset
 - [ ] Gmail watch over Pub/Sub, created at connect and renewed by a job before it expires
@@ -157,7 +158,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [ ] Preset resolution as a pure function of server now and zone: Later today is 18:00 or 3 hours from now once past 15:00, Tomorrow 08:00, This weekend Saturday 09:00, Next week Monday 08:00; tests across DST
 - [ ] Until Gmail's verification is done, Send cannot be set to Auto on a Gmail account: the permission function returns Ask, and the setting is refused on agent create and update; one flag turns this off when verification completes; test
 - [ ] `MailService.Send` creates a send job: due 10 seconds after the Backend receives it for undo send, or at a given time for scheduled send; undo, reschedule and cancel go through the due-time rule
-- [ ] The send job runs in the send lane from the address the mail came to, with our own `Message-ID`, through the ledger
+- [ ] The send job runs in the send lane from the address the mail came to, with our own `Message-ID`, through the ledger; its lane keeps `failsOn("sends")`
 - [ ] After an uncertain send the job looks for its `Message-ID` in Sent; found means sent, not found means the job waits for approval with an item asking the user; a send is never retried blindly; tests of the decision function
 - [ ] Reply and forward set `In-Reply-To`, `References` and the provider thread id, with tests per provider
 - [ ] Attachment upload in `api.v1` with a size limit, attached on send
