@@ -52,8 +52,9 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [x] Lanes in one registry in code: per job kind a concurrency cap, retry policy and timeout; test that a full agent lane does not stop a send from being claimed
 - [x] Retry policy as a pure backoff function; a timeout counts as a failed attempt; an exhausted job becomes failed; tests
 - [x] Run log table for agent runs; a finished job is deleted in the same transaction that writes its outcome to the run log
-      Written by the statement that deletes the job; a failed run carries its reason (`failure_reason` enum: timed out, threw; each lane adds its own), and a lane that does not log writes nothing
+      Written by the statement that deletes the job; a failed run carries its reason (`failure_reason` enum: timed out, threw; each lane adds its own), and a lane that keeps its subject writes no run log
 - [ ] A job of another kind that exhausts its retries is shown on what it concerns: a fetch or token job sets the account status, a send job sets the message's send state, each with a reason
+      Partly: a lane `keeps` (`job.ts`) the run log or its subject, whose `failed` record runs with the reason in the transaction that deletes the job; a record that throws is logged and its lease pushed back, never stopping other jobs; tests; account status and send state plug in with the fetch, token and send lanes
 - [ ] Retention cleanup job: run log rows older than 90 days and transcripts older than 30 days are deleted, except the transcript of a parked run until it resolves; test of the cutoff function
 - [ ] Fair claiming across users (round robin over users with ready jobs) and a per-user cap on running jobs, with a priority per lane deciding which lane goes first under that shared cap; tests of fairness and ordering with one user holding a large backlog
 - [x] Executor interface inside the Backend process: take a claimed job, return an outcome, hold nothing between jobs; one in-process implementation, so a separate process can replace it later

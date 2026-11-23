@@ -1,3 +1,5 @@
+import type { TransactionSQL } from "bun";
+
 export type Status =
 	| "scheduled"
 	| "ready"
@@ -77,7 +79,6 @@ export const transition = (status: Status, event: Event): Target | undefined =>
 export const sources = (event: Event) =>
 	Object.keys(TRANSITIONS[event]) as Status[];
 
-/** Why an attempt failed. The `failure_reason` enum: each value is added here and to the enum, by migration, together. */
 export type FailureReason = "timed_out" | "threw";
 
 export type Outcome =
@@ -108,12 +109,28 @@ export type Job = {
 	payload: Uint8Array;
 };
 
+/** What a lane's finished jobs keep once their row is deleted. */
+export type Keeps =
+	/** Agent runs: every finish is written to the run log. */
+	| { to: "run_log" }
+	/** Any other kind: a job that exhausts its retries shows on what it concerns
+	 * (an account's status, a message's send state). `failed` gets the deleted row, payload included,
+	 * and runs inside the transaction that deletes the job, so it only writes to the database.
+	 * A subject that no longer exists is a no-op, not an error. */
+	| {
+			to: "subject";
+			failed: (
+				tx: TransactionSQL,
+				job: Job,
+				reason: FailureReason,
+			) => Promise<void>;
+	  };
+
 export type Lane = {
 	concurrency: number;
 	timeoutSeconds: number;
 	retry: RetryPolicy;
-	/** Agent run lanes: a finished job's outcome is written to the run log as the job is deleted. */
-	log: boolean;
+	keeps: Keeps;
 	run: (job: Job, signal: AbortSignal) => Promise<Outcome>;
 };
 

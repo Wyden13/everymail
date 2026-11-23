@@ -92,7 +92,7 @@ const lane = (concurrency: number): Lane => ({
 	concurrency,
 	timeoutSeconds: 30,
 	retry: policy,
-	log: false,
+	keeps: { to: "subject", failed: async () => {} },
 	run: async () => "succeed",
 });
 
