@@ -12,7 +12,7 @@ import { AuthService } from "./gen/api/v1/auth_pb";
 import { HealthService } from "./gen/api/v1/health_pb";
 import { check } from "./health";
 import { serve } from "./http";
-import { LANES } from "./lanes";
+import { lanes } from "./lanes";
 import { migrate } from "./migrate";
 import type { OidcConfig } from "./oidc";
 import { publicCookieRpc, publicRpc, userCookieRpc, userRpc } from "./rpc";
@@ -52,13 +52,12 @@ const table = new Map([
 	userRpc(AuthService.method.getSession, getSession(sql)),
 	userCookieRpc(AuthService.method.signOut, signOut(sql)),
 ]);
+await migrate(sql);
+const executor = createExecutor(sql, lanes(sql));
 const pages = new Map([
-	["/auth/callback", signInCallback(sql, identifyWith(oidc))],
+	["/auth/callback", signInCallback(sql, identifyWith(oidc), executor.wake)],
 ]);
 
-await migrate(sql);
-// biome-ignore lint/correctness/noUnusedVariables: handlers that enqueue a job get executor.wake, through commit in jobs.ts
-const executor = createExecutor(sql, LANES);
 const server = serve(
 	table,
 	pages,

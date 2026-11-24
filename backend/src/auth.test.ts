@@ -165,7 +165,8 @@ const identify: Identify = async (_, code) => {
 	if (code !== "good") throw new Error("invalid_grant");
 	return { subject: "sub", email: "a@b.c" };
 };
-const callback = signInCallback(sql, identify);
+let wakes = 0;
+const callback = signInCallback(sql, identify, () => wakes++);
 const stateOf = (authorizeUrl: string) =>
 	new URL(authorizeUrl).searchParams.get("state") ?? "";
 const arrive = (
@@ -231,6 +232,17 @@ test("a native callback hands the browser to the app's loopback by POST, and the
 	expect(
 		textOf(await arrive(stateOf(authorizeUrl), { code: "good" })),
 	).toContain("expired");
+});
+
+test("a new user gets one retention job, and signing in again adds none", async () => {
+	for (const _ of [1, 2])
+		await handedOff((await start(native(4100))).message.authorizeUrl);
+	const jobs = await sql`
+		SELECT j.status, j.due_at > now() + interval '23 hours' AS later FROM jobs j
+		JOIN users u ON u.id = j.user_id
+		WHERE u.subject = 'sub' AND j.kind = 'retention'`;
+	expect(jobs).toEqual([{ status: "scheduled", later: true }]);
+	expect(wakes).toBeGreaterThan(0);
 });
 
 test("a handoff not collected within a minute is worth nothing", async () => {
