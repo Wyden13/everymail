@@ -67,7 +67,7 @@ export function createExecutor(sql: SQL, lanes: Lanes): Executor {
 			typeof outcome === "string"
 				? {}
 				: "repeatInSeconds" in outcome
-					? { dueInSeconds: outcome.repeatInSeconds, attempts: "reset" }
+					? { dueInSeconds: outcome.repeatInSeconds }
 					: {
 							reason: outcome.fail,
 							dueInSeconds:
