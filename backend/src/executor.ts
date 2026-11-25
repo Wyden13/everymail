@@ -54,7 +54,9 @@ export function createExecutor(sql: SQL, lanes: Lanes): Executor {
 		const event =
 			typeof outcome === "string"
 				? outcome
-				: failure(lane.retry, job.attempt, "fail");
+				: "repeatInSeconds" in outcome
+					? "repeat"
+					: failure(lane.retry, job.attempt, "fail");
 		const target = transition("running", event);
 		if (!target) throw new Error(`running refused ${event}`);
 		await settle(
@@ -64,11 +66,13 @@ export function createExecutor(sql: SQL, lanes: Lanes): Executor {
 			target,
 			typeof outcome === "string"
 				? {}
-				: {
-						reason: outcome.fail,
-						dueInSeconds:
-							event === "fail" ? backoffSeconds(lane.retry, job.attempt) : 0,
-					},
+				: "repeatInSeconds" in outcome
+					? { dueInSeconds: outcome.repeatInSeconds, attempts: "reset" }
+					: {
+							reason: outcome.fail,
+							dueInSeconds:
+								event === "fail" ? backoffSeconds(lane.retry, job.attempt) : 0,
+						},
 		);
 	}
 

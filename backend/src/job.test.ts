@@ -30,6 +30,7 @@ const EVENTS: Event[] = [
 	"resolve",
 	"pause",
 	"resume",
+	"repeat",
 	"cancel",
 ];
 
@@ -48,6 +49,7 @@ const ALLOWED: Record<string, Target> = {
 	"pause scheduled": { status: "paused" },
 	"pause ready": { status: "paused" },
 	"resume paused": { status: "ready" },
+	"repeat running": { status: "scheduled" },
 	"cancel scheduled": { finished: "cancelled" },
 	"cancel ready": { finished: "cancelled" },
 	"cancel waiting_for_approval": { finished: "cancelled" },

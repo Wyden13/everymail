@@ -19,6 +19,7 @@ export type Event =
 	| "resolve"
 	| "pause"
 	| "resume"
+	| "repeat"
 	| "cancel";
 
 export type Target =
@@ -64,6 +65,9 @@ const TRANSITIONS: Record<Event, Partial<Record<Status, Target>>> = {
 	resume: {
 		paused: to("ready"),
 	},
+	repeat: {
+		running: to("scheduled"),
+	},
 	cancel: {
 		scheduled: end("cancelled"),
 		ready: end("cancelled"),
@@ -83,7 +87,9 @@ export type FailureReason = "timed_out" | "threw";
 
 export type Outcome =
 	| Extract<Event, "succeed" | "await_approval" | "await_event">
-	| { fail: FailureReason };
+	| { fail: FailureReason }
+	/** Done for now: the same row runs again after this many seconds, with its attempts reset. */
+	| { repeatInSeconds: number };
 
 export type RetryPolicy = {
 	maxAttempts: number;
@@ -117,6 +123,8 @@ export type Keeps =
 	 * (an account's status, a message's send state). `failed` gets the deleted row, payload included,
 	 * and runs inside the transaction that deletes the job, so it only writes to the database.
 	 * A subject that no longer exists is a no-op, not an error. */
+	/** A repeating job: it never finishes and retries without limit, so it has nothing to keep. */
+	| { to: "nothing" }
 	| {
 			to: "subject";
 			failed: (

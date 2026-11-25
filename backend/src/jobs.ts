@@ -99,12 +99,19 @@ export async function settle(
 	{
 		dueInSeconds = 0,
 		reason,
-	}: { dueInSeconds?: number; reason?: FailureReason } = {},
+		attempts = "kept",
+	}: {
+		dueInSeconds?: number;
+		reason?: FailureReason;
+		/** `reset` starts the retry count over, as for a repeat that begins a new period. */
+		attempts?: "kept" | "reset";
+	} = {},
 ): Promise<boolean> {
 	if (!("finished" in target)) {
 		const rows = await sql`
 			UPDATE jobs SET status = ${target.status}::job_status, lease_until = NULL,
-				due_at = now() + make_interval(secs => ${dueInSeconds})
+				due_at = now() + make_interval(secs => ${dueInSeconds}),
+				attempt = CASE WHEN ${attempts === "reset"} THEN 0 ELSE attempt END
 			WHERE id = ${job.id} AND attempt = ${job.attempt} AND status = ${RUNNING}::job_status
 			RETURNING 1`;
 		return rows.length > 0;
