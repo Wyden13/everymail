@@ -30,7 +30,6 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [x] Google's sign-in client is required to start and Microsoft's is optional; `StartSignIn` with a provider that has no client answers 400 and records no attempt; test
 - [ ] `AuthService` names the providers it offers, so the sign-in screen shows only those instead of failing on one that is not configured
 - [ ] Limit how fast one address can start sign-in attempts and reach the callback, once the proxy's client address can be trusted
-- [ ] Decide: whether a Microsoft user is keyed on `sub` alone or on the tenant id with it. Microsoft documents `tid` plus `oid` as the stable key across tenants
 - [ ] Test the ID token check (audience, expiry against the database clock, RS256 only) against a local key set
       Partly: `oidc.test.ts` covers the issuer, nonce and email claims through `checkClaims`, PKCE and the authorize URL; no test runs `jwtVerify` against a local key set, so audience, expiry and RS256-only are untested
 - [x] User and session tables, with `AuthService` in `api.v1`
@@ -182,7 +181,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [ ] Mail content and notes are wrapped as delimited data in the prompt; the wrapper neutralizes the delimiter inside content; test with hostile content
 - [ ] "Advance run" job kind: load the transcript, make one LLM call, store the response, enqueue the tool calls; each tool result enqueues "advance run" again
 - [ ] Tool calls run as jobs through the side-effect ledger; the run's job is waiting for an event until their results are stored
-      Readying the run's job (resolve, resume) resets its attempt to 0, so the retry policy counts attempts of one turn, not the run's steps; test
+      Readying the run's job (resolve, resume) stores its current attempt as the turn's start in a column of the job, and the retry policy counts from there, so it counts attempts of one turn, not the run's steps. The attempt itself never resets: `settle` matches a claim on it; test
 - [ ] Embedding retrieval tool: an agent finds related past mail by meaning
 - [ ] A run stops at the steps per run cap or at 600 seconds of active time (time spent waiting for approval does not count); one pure limit function, with tests
 - [ ] `finish` tool with a typed deliverable message; a reply with no tool call fails the run; prose is never parsed
@@ -325,6 +324,7 @@ Agents only: files and sheets an agent is pointed at. There is no file browser
 - [x] Public RPC that adds a signup; it is the single call a client other than the engine makes
       No ceiling on the table, on purpose: signups do not expire, so a flood would close the list to real people for good. The rate-limit task below is the guard
 - [ ] Rate limiting on the public RPC as a pure function over request counts per client address and a fixed window passed in; tests at, below and over the limit
+      Built before the public landing page is pointed at the Backend
 
 ## Deployment and measurement
 
@@ -332,6 +332,7 @@ Agents only: files and sheets an agent is pointed at. There is no file browser
 - [ ] The reverse proxy that serves EveryAI routes mail.everyai.dev with TLS to the Backend, the landing site and the web app (per TODO-frontend: Decide where the web app is served), reaches the webhook endpoints from Gmail push and Graph, and does not buffer the sync stream; a heartbeat arrives through it within 25 seconds
 - [ ] Encryption key is a root-only file on the VM outside Postgres; the Backend refuses to start without it
 - [ ] Watchdog job kind on a due-time schedule: a pure threshold function over queue depth, the oldest ready job and failure rates, and a notification to the owner when a threshold is crossed; test of the function; no external monitoring service
+      Covers a repeating job that keeps failing, such as retention, which otherwise only reaches the log
 - [ ] Revisit backups before the first real users: none exist until then, and agents, notes, rules and run logs are lost with the VM
 - [ ] Measure Backend idle and loaded memory on the VM and record it next to the Postgres gate
 - [ ] Measure mail arrival to the start of an agent run against the targets: under 60 seconds with push, under 120 with polling

@@ -83,7 +83,7 @@ Everything the Backend does on its own is a job: fetching mail, sending mail, sn
 
 ## Agent runs
 
-- A run is a loop, and each turn of it is one claim of the run's job. "Advance run" loads the transcript, makes one LLM call, stores the response and enqueues the tool calls, then waits for an event; each tool result readies "advance run" again. Readying it resets the attempt count, so retries count within one turn
+- A run is a loop, and each turn of it is one claim of the run's job. "Advance run" loads the transcript, makes one LLM call, stores the response and enqueues the tool calls, then waits for an event; each tool result readies "advance run" again. The attempt count never resets, because a claim's result is recorded only against its own attempt number; the job stores the attempt at which the turn started, and retries count from there
 - A run stops at 30 steps or 600 seconds of active time
 - The prompt is assembled from stored parts, stable first so most of each call is a cache hit: system prompt, tools, the agent's instructions, permissions, then notes, mail content and other context
 - One fixed, versioned system prompt serves every agent. All variation lives in the user's instructions, the permissions and the tool list
@@ -145,7 +145,7 @@ The user can write to an agent and get an answer, for a question about their mai
 - The handoff travels in a POST body, never in a URL, and is good for 60 seconds. When nothing listens on the port, as on the machine of someone sent a link, the browser shows a failed page with no secret in its address bar or history to be talked into pasting. What remains is the risk every loopback return has: another program on the same machine that takes the port first
 - This loopback listener is the one exception to the engine running no local server. It listens on 127.0.0.1 only, until a handoff is accepted, for the life of one attempt. Phones will return through an app link, another case of the same `return` choice
 - Considered and not chosen: redirecting the provider straight to the app's loopback (the app would hold the PKCE verifier, but each provider would need a second, public client registration and the Backend would lose the single redirect URI); a short code typed into the callback page, or the handoff in the redirect URL (a phisher can have either relayed); a confirmation page naming the device (it relies on the user noticing)
-- A user is the provider plus its `sub` claim. The email is for display only, so the same person through Google and through Microsoft is two users
+- A user is the provider plus its `sub` claim, for Microsoft too: `sub` is unique per user for the one app registration sign-in uses, so the tenant id is not part of the key. The email is for display only, so the same person through Google and through Microsoft is two users
 - The session is an opaque random token; only its SHA-256 is stored. It lives 30 days from its last use, renewed at most once a day. Native clients send it as a bearer token; web gets it as the `__Host-session` cookie (HttpOnly, Secure, SameSite=Strict), and both resolve to the same row
 - Cross-site requests cannot ride on the cookie: every call is a POST with `Content-Type: application/proto`, which needs a CORS preflight the Backend never grants, and the cookie is SameSite=Strict
 
@@ -244,4 +244,4 @@ Everything the app does with judgement is done by an agent the user can see. Not
 - The web app lives on the same origin under Gmail-style paths: `/u/<n>/` followed by the view and, for a thread, its id. `<n>` is the slot of the signed-in user in this browser, 0 until several sign-ins are supported
 - The Backend's calls stay on the same origin under their `/api.v1.` paths, so the session cookie and same-origin rule need no cross-origin setup
 - On web the path is the engine's navigation state written out: the engine produces it, and opening a link is an intent sent to the engine. The Frontend does no routing of its own
-- The waitlist form posts to one public Backend call. This is the single exception to the engine being the Backend's only client
+- The waitlist form posts to one public Backend call. This is the single exception to the engine being the Backend's only client. The public site is pointed at the Backend only once that call is rate limited per client address
