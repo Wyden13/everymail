@@ -456,7 +456,7 @@ test("commit wakes the executor once the enqueue is visible, and a rollback wake
 			userId: users.a,
 			kind: "test",
 			payload: new Uint8Array(),
-			dueInSeconds: 0,
+			due: { inSeconds: 0 },
 		});
 	const id = await commit(sql, wake, async (tx) => {
 		const added = await enqueueIn(tx);

@@ -56,6 +56,7 @@ Everything the Backend does on its own is a job: fetching mail, sending mail, sn
 
 - Postgres `now()` is the only source of "now". Client clocks are never trusted: clients send intents and the server stamps them
 - Instants are stored in UTC. A scheduled time arrives as an absolute UTC instant, or as wall time plus an IANA zone from which the server computes the instant. Recurrence rules keep their zone, because "daily at 08:00" is not one instant
+- Postgres converts wall time with its own time zone database, so the zone rules exist once. A wall time skipped by a daylight saving change moves forward by the gap; one that happens twice is the later. A date, time or zone that does not exist is refused as a bad request
 - Durations are in seconds everywhere in the Backend
 - A proactive wakeup has a minimum interval of 900 seconds (15 minutes), with jitter
 - After downtime a missed schedule runs once, not once per missed slot. If the previous run is still going when the next is due, the next is skipped
