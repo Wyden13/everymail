@@ -1,8 +1,8 @@
 import type { SQL } from "bun";
 import type { Lane } from "./job";
 
-/** Days each kept table holds a row. Transcripts, events and conversation turns join as their tables land. */
-export const RETENTION_DAYS = { run_log: 90 } as const;
+/** Seconds each kept table holds a row. Transcripts, events and conversation turns join as their tables land. */
+export const RETENTION_SECONDS = { run_log: 7_776_000 } as const;
 
 /** How often a user's retention job runs. */
 export const SWEEP_SECONDS = 86_400;
@@ -24,7 +24,7 @@ export async function sweep(sql: SQL, userId: string): Promise<void> {
 	await sql`
 		DELETE FROM run_log
 		WHERE user_id = ${userId}
-			AND finished_at < now() - make_interval(days => ${RETENTION_DAYS.run_log})`;
+			AND finished_at < now() - make_interval(secs => ${RETENTION_SECONDS.run_log})`;
 }
 
 /** The retention lane: one job per user, ensured at boot and sign-in, that runs daily and never gives up. */
