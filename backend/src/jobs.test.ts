@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import { SQL } from "bun";
 import type { Lane } from "./job";
-import { claim, enqueue, expireLeases, secondsUntilNext, settle } from "./jobs";
+import {
+	claim,
+	commit,
+	enqueue,
+	expireLeases,
+	secondsUntilNext,
+	settle,
+} from "./jobs";
 import { migrate } from "./migrate";
 
 const url = process.env.DATABASE_URL;
@@ -205,4 +212,33 @@ test("the next wake is the nearest due time or lease end", async () => {
 	const lease = await secondsUntilNext(sql, []);
 	expect(lease).toBeGreaterThan(590);
 	expect(lease).toBeLessThanOrEqual(600);
+});
+
+test("commit wakes the executor once the enqueue is visible, and a rollback wakes nothing", async () => {
+	let wakes = 0;
+	const wake = () => {
+		wakes++;
+	};
+	const enqueueIn = (tx: SQL) =>
+		enqueue(tx, {
+			userId,
+			kind: "test",
+			payload: new Uint8Array(),
+			dueInSeconds: 0,
+		});
+	const id = await commit(sql, wake, async (tx) => {
+		const added = await enqueueIn(tx);
+		expect(wakes).toBe(0);
+		return added;
+	});
+	expect(wakes).toBe(1);
+	expect(await statusOf(id)).toBe("scheduled");
+	await expect(
+		commit(sql, wake, async (tx) => {
+			await enqueueIn(tx);
+			throw new Error("rolled back");
+		}),
+	).rejects.toThrow("rolled back");
+	expect(wakes).toBe(1);
+	expect(await sql`SELECT id FROM jobs`).toHaveLength(1);
 });
