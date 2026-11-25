@@ -12,6 +12,7 @@ import {
 	type StartSignInRequest,
 	StartSignInResponseSchema,
 } from "./gen/api/v1/auth_pb";
+import { commit } from "./jobs";
 import {
 	authorizeUrl,
 	type Identity,
@@ -19,6 +20,7 @@ import {
 	type OidcConfig,
 	type Provider,
 } from "./oidc";
+import { ensure } from "./retention";
 import {
 	type Answer,
 	type CookieChange,
@@ -197,7 +199,7 @@ async function settle(
 }
 
 /** GET /auth/callback, where the provider sends the browser. */
-export function signInCallback(sql: SQL, identify: Identify) {
+export function signInCallback(sql: SQL, identify: Identify, wake: () => void) {
 	return async (query: URLSearchParams, cookie: ReadCookie): Promise<Page> => {
 		const stateHash = hashToken(query.get("state") ?? "");
 		const [attempt]: Attempt[] = await sql`
@@ -216,12 +218,13 @@ export function signInCallback(sql: SQL, identify: Identify) {
 		}
 
 		// Each change below is conditional on the attempt still pending: a second callback for it finds none
-		return sql.begin(async (tx): Promise<Page> => {
+		return commit(sql, wake, async (tx): Promise<Page> => {
 			const [user] = await tx`
 				INSERT INTO users (provider, subject, email)
 				VALUES (${attempt.provider}::sign_in_provider, ${outcome.subject}, ${outcome.email})
 				ON CONFLICT (provider, subject) DO UPDATE SET email = EXCLUDED.email
 				RETURNING id`;
+			await ensure(tx);
 			if (attempt.client === "web") {
 				const [taken] = await tx`
 					DELETE FROM sign_in_attempts

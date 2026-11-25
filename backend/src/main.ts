@@ -13,9 +13,10 @@ import { HealthService } from "./gen/api/v1/health_pb";
 import { WaitlistService } from "./gen/api/v1/waitlist_pb";
 import { check } from "./health";
 import { serve } from "./http";
-import { LANES } from "./lanes";
+import { lanes } from "./lanes";
 import { migrate } from "./migrate";
 import type { OidcConfig } from "./oidc";
+import { ensure } from "./retention";
 import { publicCookieRpc, publicRpc, userCookieRpc, userRpc } from "./rpc";
 import { resolveSession } from "./session";
 import { join } from "./waitlist";
@@ -55,12 +56,13 @@ const table = new Map([
 	userRpc(AuthService.method.getSession, getSession(sql)),
 	userCookieRpc(AuthService.method.signOut, signOut(sql)),
 ]);
+await migrate(sql);
+await ensure(sql);
+const executor = createExecutor(sql, lanes(sql));
 const pages = new Map([
-	["/auth/callback", signInCallback(sql, identifyWith(oidc))],
+	["/auth/callback", signInCallback(sql, identifyWith(oidc), executor.wake)],
 ]);
 
-await migrate(sql);
-createExecutor(sql, LANES);
 const server = serve(
 	table,
 	pages,

@@ -17,6 +17,7 @@ export type Event =
 	| "resolve"
 	| "pause"
 	| "resume"
+	| "repeat"
 	| "cancel";
 
 export type Target =
@@ -62,6 +63,9 @@ const TRANSITIONS: Record<Event, Partial<Record<Status, Target>>> = {
 	resume: {
 		paused: to("ready"),
 	},
+	repeat: {
+		running: to("scheduled"),
+	},
 	cancel: {
 		scheduled: end("cancelled"),
 		ready: end("cancelled"),
@@ -82,7 +86,9 @@ export type FailureReason = "timed_out" | "threw";
 
 export type Outcome =
 	| Extract<Event, "succeed" | "await_approval" | "await_event">
-	| { fail: FailureReason };
+	| { fail: FailureReason }
+	/** Done for now: the same row runs again after this many seconds. */
+	| { repeatInSeconds: number };
 
 export type RetryPolicy = {
 	maxAttempts: number;

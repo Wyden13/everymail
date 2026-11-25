@@ -46,8 +46,8 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 - [x] Batch claim with `FOR UPDATE SKIP LOCKED` moves due jobs to running under a lease and commits before any external call; test of ordering by due time
       No transaction and no executor is held open across an external call: claim and commit, call, then record and commit
 - [x] A lease that expires returns the job to ready through the transition function, so a restart retries in-flight jobs from their start; tests with due times and leases set relative to Postgres `now()`
-- [ ] Wake-up without idle polling: enqueueing signals the executor in process, and a timer sleeps until the next due time
-      Partly: the executor's `wake`, a timer set from Postgres's own clock, and `commit` (`jobs.ts`), which wakes the executor once a transaction that enqueues commits and not on rollback, exist and are tested. No handler enqueues yet and `main.ts` discards the executor's handle; done when the first one goes through `commit`
+- [x] Wake-up without idle polling: enqueueing signals the executor in process, and a timer sleeps until the next due time
+      The executor's `wake`, a timer set from Postgres's own clock, and `commit` (`jobs.ts`), which wakes the executor once a transaction that enqueues commits and not on rollback, are tested; sign-in goes through `commit` with the executor's `wake`
       The timer delay is computed by Postgres (due time minus `now()`), not by the process clock. No `LISTEN/NOTIFY`: `Bun.sql` cannot receive it, so it is added only if the executor becomes a separate process
 - [x] Lanes in one registry in code: per job kind a concurrency cap, retry policy and timeout; test that a full agent lane does not stop a send from being claimed
 - [x] Retry policy as a pure backoff function; a timeout counts as a failed attempt; an exhausted job becomes failed; tests
@@ -55,7 +55,8 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
       Written by the statement that deletes the job; a failed run carries its reason (`failure_reason` enum: timed out, threw; each lane adds its own), and a lane that does not log writes nothing
 - [ ] A job of another kind that exhausts its retries is shown on what it concerns: a fetch or token job sets the account status, a send job sets the message's send state, each with a reason
       Comes with the account and send tables, not before them. The reason shown is the lane's own (bad credentials, provider refused), not the run log's timed out or threw; it must not overwrite sign-in expired; a record that cannot be written must still let the job leave the table; and a send that timed out is uncertain, not failed (see Write actions)
-- [ ] Retention cleanup job: run log rows older than 90 days and transcripts older than 30 days are deleted, except the transcript of a parked run until it resolves; test of the cutoff function
+- [x] Retention cleanup job: run log rows older than 90 days are deleted; test of the cutoff
+      One `retention` job per user, which `ensure` (`retention.ts`) gives every user lacking one at boot and in each sign-in transaction. It repeats daily through the `repeat` event (running to scheduled), retries hourly and never gives up. `sweep` deletes past `RETENTION_DAYS` in one statement; transcripts, events and conversation turns add their delete there
 - [ ] Fair claiming across users (round robin over users with ready jobs) and a per-user cap on running jobs, with a priority per lane deciding which lane goes first under that shared cap; tests of fairness and ordering with one user holding a large backlog
 - [x] Executor interface inside the Backend process: take a claimed job, return an outcome, hold nothing between jobs; one in-process implementation, so a separate process can replace it later
 - [x] Postgres `now()` is the only source of "now": CI lint bans `Date.now()` and `new Date()` without arguments in the Backend
@@ -172,7 +173,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
 
 ## Agent runs
 
-- [ ] Run tables: run id (the job's id), agent, cause and hop count, status as a `oneof` (running, waiting for approval, paused, done, declined, failed with a reason, stopped at a limit), and a transcript of steps (kept, drafted, archived, labelled, filed, logged, failed); retention per the cleanup job above
+- [ ] Run tables: run id (the job's id), agent, cause and hop count, status as a `oneof` (running, waiting for approval, paused, done, declined, failed with a reason, stopped at a limit), and a transcript of steps (kept, drafted, archived, labelled, filed, logged, failed); transcripts older than 30 days join the retention sweep, except while the run's job is waiting for approval; test of the cutoff
       A live run's status comes from its job row and a finished run's from the run log; neither is stored twice
 - [ ] Tool registry in code: each tool has a typed input, an action category for permissions and an executor; the model's tool list is generated from it
 - [ ] Tools offered to the model are only those whose category is not Off; a test that an Off category is absent from the list

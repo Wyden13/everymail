@@ -47,6 +47,7 @@ Everything the Backend does on its own is a job: fetching mail, sending mail, sn
 - Columns hold what the claim query needs; the rest of the payload is protobuf
 - A finished job is deleted; the run log is what is kept. The run log covers agent runs. It holds finished runs only, written by the same statement that deletes the job: a live run is its job row, and a run's id is its job's id. A failed run carries its reason from an explicit enum. A job of another kind that keeps failing shows on the thing it concerns: the account's status or the message's send state
 - The run log is kept 90 days. The transcript, which holds mail content and model output, is deleted after 30 days; a parked run keeps its transcript until it resolves
+- A job can repeat: it moves from running back to scheduled on the same row, so it never finishes and keeps nothing. Retention is one such job per user, run daily; it retries without limit, and one that keeps failing is only logged and retried hourly. Boot and every sign-in transaction ensure each user has one, so users and rows that predate it are covered. Each kept table adds its delete to that one sweep, with its days in one table in code
 - The executor runs inside the Backend process, behind an interface that allows a separate process later. A restart retries in-flight jobs from their start
 - Every row carries a user id. Claiming is fair across users and capped per user, so one backlog cannot starve the rest. Sized for tens to hundreds of users on the one VM
 

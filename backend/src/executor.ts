@@ -1,6 +1,7 @@
 import type { SQL } from "bun";
 import {
 	backoffSeconds,
+	type Event,
 	failure,
 	freeSlots,
 	type Job,
@@ -28,6 +29,26 @@ const aborted = (signal: AbortSignal) =>
 		}),
 	);
 
+/** The event an outcome stands for, and what `settle` needs besides the target. */
+function settlement(
+	lane: Lane,
+	job: Job,
+	outcome: Outcome,
+): [Event, Parameters<typeof settle>[4]] {
+	if (typeof outcome === "string") return [outcome, {}];
+	if ("repeatInSeconds" in outcome)
+		return ["repeat", { dueInSeconds: outcome.repeatInSeconds }];
+	const event = failure(lane.retry, job.attempt, "fail");
+	return [
+		event,
+		{
+			reason: outcome.fail,
+			dueInSeconds:
+				event === "fail" ? backoffSeconds(lane.retry, job.attempt) : 0,
+		},
+	];
+}
+
 /** Runs jobs inside this process. Holds only how many jobs each lane is running; all job state is in Postgres.
  * Never polls: a pass runs when woken, and a timer sleeps until the next due time or lease end. */
 export function createExecutor(sql: SQL, lanes: Lanes): Executor {
@@ -51,25 +72,10 @@ export function createExecutor(sql: SQL, lanes: Lanes): Executor {
 			outcome = { fail: signal.aborted ? "timed_out" : "threw" };
 		}
 		count(job.kind, -1);
-		const event =
-			typeof outcome === "string"
-				? outcome
-				: failure(lane.retry, job.attempt, "fail");
+		const [event, options] = settlement(lane, job, outcome);
 		const target = transition("running", event);
 		if (!target) throw new Error(`running refused ${event}`);
-		await settle(
-			sql,
-			lane,
-			job,
-			target,
-			typeof outcome === "string"
-				? {}
-				: {
-						reason: outcome.fail,
-						dueInSeconds:
-							event === "fail" ? backoffSeconds(lane.retry, job.attempt) : 0,
-					},
-		);
+		await settle(sql, lane, job, target, options);
 	}
 
 	/** Claims what each lane has room for and starts it, then sleeps until the next due time. */

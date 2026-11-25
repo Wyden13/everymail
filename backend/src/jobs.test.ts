@@ -185,6 +185,24 @@ test("a retried attempt is scheduled after its backoff", async () => {
 	expect(await claim(sql, "test", 1, 30)).toEqual([]);
 });
 
+test("a repeat keeps the row and its attempt count, scheduled after its interval", async () => {
+	const id = await add(0);
+	const [job] = await claim(sql, "test", 1, 30);
+	if (!job) throw new Error("not claimed");
+	await settle(
+		sql,
+		logged,
+		job,
+		{ status: "scheduled" },
+		{ dueInSeconds: 3600 },
+	);
+	expect(
+		await sql`SELECT status, attempt, due_at > now() + interval '59 minutes' AS later
+			FROM jobs WHERE id = ${id}`,
+	).toEqual([{ status: "scheduled", attempt: 1, later: true }]);
+	expect(await logOf(id)).toEqual([]);
+});
+
 test("the next wake is the nearest due time or lease end", async () => {
 	expect(await secondsUntilNext(sql, ["test"])).toBeUndefined();
 	await add(3600);
