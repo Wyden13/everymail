@@ -88,7 +88,7 @@ export type FailureReason = "timed_out" | "threw";
 export type Outcome =
 	| Extract<Event, "succeed" | "await_approval" | "await_event">
 	| { fail: FailureReason }
-	/** Done for now: the same row runs again after this many seconds, with its attempts reset. */
+	/** Done for now: the same row runs again after this many seconds. */
 	| { repeatInSeconds: number };
 
 export type RetryPolicy = {
@@ -119,12 +119,12 @@ export type Job = {
 export type Keeps =
 	/** Agent runs: every finish is written to the run log. */
 	| { to: "run_log" }
+	/** A repeating job: it never finishes and retries without limit, so it has nothing to keep. */
+	| { to: "nothing" }
 	/** Any other kind: a job that exhausts its retries shows on what it concerns
 	 * (an account's status, a message's send state). `failed` gets the deleted row, payload included,
 	 * and runs inside the transaction that deletes the job, so it only writes to the database.
 	 * A subject that no longer exists is a no-op, not an error. */
-	/** A repeating job: it never finishes and retries without limit, so it has nothing to keep. */
-	| { to: "nothing" }
 	| {
 			to: "subject";
 			failed: (

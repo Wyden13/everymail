@@ -15,6 +15,7 @@ import { serve } from "./http";
 import { lanes } from "./lanes";
 import { migrate } from "./migrate";
 import type { OidcConfig } from "./oidc";
+import { ensure } from "./retention";
 import { publicCookieRpc, publicRpc, userCookieRpc, userRpc } from "./rpc";
 import { resolveSession } from "./session";
 
@@ -53,6 +54,7 @@ const table = new Map([
 	userCookieRpc(AuthService.method.signOut, signOut(sql)),
 ]);
 await migrate(sql);
+await ensure(sql);
 const executor = createExecutor(sql, lanes(sql));
 const pages = new Map([
 	["/auth/callback", signInCallback(sql, identifyWith(oidc), executor.wake)],

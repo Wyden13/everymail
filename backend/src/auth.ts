@@ -12,7 +12,7 @@ import {
 	type StartSignInRequest,
 	StartSignInResponseSchema,
 } from "./gen/api/v1/auth_pb";
-import { commit, enqueue } from "./jobs";
+import { commit } from "./jobs";
 import {
 	authorizeUrl,
 	type Identity,
@@ -20,7 +20,7 @@ import {
 	type OidcConfig,
 	type Provider,
 } from "./oidc";
-import { SWEEP_SECONDS } from "./retention";
+import { ensure } from "./retention";
 import {
 	type Answer,
 	type CookieChange,
@@ -219,19 +219,12 @@ export function signInCallback(sql: SQL, identify: Identify, wake: () => void) {
 
 		// Each change below is conditional on the attempt still pending: a second callback for it finds none
 		return commit(sql, wake, async (tx): Promise<Page> => {
-			// xmax is 0 only on a row this statement inserted, not on one the conflict updated
 			const [user] = await tx`
 				INSERT INTO users (provider, subject, email)
 				VALUES (${attempt.provider}::sign_in_provider, ${outcome.subject}, ${outcome.email})
 				ON CONFLICT (provider, subject) DO UPDATE SET email = EXCLUDED.email
-				RETURNING id, xmax = 0 AS created`;
-			if (user.created)
-				await enqueue(tx, {
-					userId: user.id,
-					kind: "retention",
-					payload: new Uint8Array(),
-					dueInSeconds: SWEEP_SECONDS,
-				});
+				RETURNING id`;
+			await ensure(tx);
 			if (attempt.client === "web") {
 				const [taken] = await tx`
 					DELETE FROM sign_in_attempts

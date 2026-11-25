@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { migrate } from "./migrate";
-import { sweep } from "./retention";
+import { ensure, sweep } from "./retention";
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("DATABASE_URL is required for the retention sweep");
@@ -30,10 +30,29 @@ test("the sweep deletes the user's run log past 90 days and nothing else", async
 		VALUES (1, ${userId}, 'retention', 'succeeded', 1, now() - interval '89 days', ''),
 			(2, ${userId}, 'retention', 'succeeded', 1, now() - interval '91 days', ''),
 			(3, ${strangerId}, 'retention', 'succeeded', 1, now() - interval '91 days', '')`;
-	await sweep(sql, userId);
+	await sweep(sql, userId, new AbortController().signal);
 	expect(
 		(await sql`SELECT id FROM run_log ORDER BY id`).map(
 			(r: { id: string }) => r.id,
 		),
 	).toEqual(["1", "3"]);
+});
+
+test("every user gets one retention job, and ensuring again adds none", async () => {
+	await sql`DELETE FROM jobs`;
+	const [{ id: keptId }] = await sql`
+		INSERT INTO users (provider, subject, email) VALUES ('google', 'c', 'c@b.c') RETURNING id`;
+	await sql`
+		INSERT INTO jobs (user_id, kind, status, due_at, payload)
+		VALUES (${keptId}, 'retention', 'scheduled', now(), '')`;
+	for (const _ of [1, 2]) await ensure(sql);
+	expect(
+		await sql`SELECT u.subject, count(j.id)::int AS jobs FROM users u
+			LEFT JOIN jobs j ON j.user_id = u.id AND j.kind = 'retention'
+			GROUP BY u.subject ORDER BY u.subject`,
+	).toEqual([
+		{ subject: "a", jobs: 1 },
+		{ subject: "b", jobs: 1 },
+		{ subject: "c", jobs: 1 },
+	]);
 });
