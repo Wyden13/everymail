@@ -19,20 +19,26 @@ const RUNNING: Status = "running";
 
 const statuses = (sql: SQL, list: Status[]) => sql.array(list, "TEXT");
 
-/** Adds a job due after a delay. Runs in the caller's transaction, which `commit` opens so the executor wakes. */
+/** When a job comes due: after a delay from Postgres `now()`, or at an instant, such as one `instant` (`time.ts`)
+ * computed from a client's scheduled time. */
+export type Due = { inSeconds: number } | { at: Date };
+
+/** Adds a job. Runs in the caller's transaction, which `commit` opens so the executor wakes. */
 export async function enqueue(
 	sql: SQL,
 	job: {
 		userId: string;
 		kind: string;
 		payload: Uint8Array;
-		dueInSeconds: number;
+		due: Due;
 	},
 ): Promise<string> {
+	const { due } = job;
 	const [row] = await sql`
 		INSERT INTO jobs (user_id, kind, status, due_at, payload)
 		VALUES (${job.userId}, ${job.kind}::job_kind, ${SCHEDULED}::job_status,
-			now() + make_interval(secs => ${job.dueInSeconds}), ${job.payload})
+			${"at" in due ? sql`${due.at}::timestamptz` : sql`now() + make_interval(secs => ${due.inSeconds})`},
+			${job.payload})
 		RETURNING id`;
 	return row.id;
 }

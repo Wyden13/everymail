@@ -97,7 +97,7 @@ export function useJobs(name: string) {
 			userId: owner,
 			kind,
 			payload,
-			dueInSeconds: due,
+			due: { inSeconds: due },
 		});
 		await sql`UPDATE jobs SET status = ${status}::job_status WHERE id = ${id}`;
 		return id;

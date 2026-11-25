@@ -60,8 +60,10 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
       `claim` (`jobs.ts`) fetches each user's due jobs up to its room, `pick` (`job.ts`, pure) does the round robin, and one statement claims them and stamps `users.claimed_at`, the turn order. The cap is `MAX_JOBS` (`lanes.ts`)
 - [x] Executor interface inside the Backend process: take a claimed job, return an outcome, hold nothing between jobs; one in-process implementation, so a separate process can replace it later
 - [x] Postgres `now()` is the only source of "now": CI lint bans `Date.now()` and `new Date()` without arguments in the Backend
-- [ ] Scheduled times arrive in `api.v1` as a `oneof` of an absolute UTC instant or wall time plus IANA zone; the server converts and stores a UTC `timestamptz`; tests of conversion across DST gap and overlap
-- [ ] Durations are integer seconds, named with a `_seconds` suffix in protobuf and columns
+- [x] Scheduled times arrive in `api.v1` as a `oneof` of an absolute UTC instant or wall time plus IANA zone; the server converts and stores a UTC `timestamptz`; tests of conversion across DST gap and overlap
+      `ScheduledTime` (`time.proto`); `instant` (`time.ts`) converts it in Postgres and refuses a nonexistent date, time or zone with a 400; `enqueue` takes `due` as a delay or an instant. No call takes one yet: Snooze and Send are the first
+- [x] Durations are integer seconds, named with a `_seconds` suffix in protobuf and columns
+      `bun run durations` (in `check`) bans `_ms`, `_millis`, `_minutes`, `_hours` and `_days` names in `proto/api` and `backend/migrations`
 - [ ] Recurrence rules stored with their zone; one pure next-run function for every schedule kind (every 15 minutes, every hour, daily at a time, weekdays at a time, custom); tests across DST changes
 - [ ] Proactive interval minimum of 900 seconds, rejected on agent create and update, with seeded jitter in the next-run function; tests of the bound and the jitter range
 - [ ] Missed-run policy: after downtime a schedule runs once, not once per missed slot; test in the next-run function
