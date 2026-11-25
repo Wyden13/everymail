@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
-import { SQL } from "bun";
+import { beforeAll, beforeEach, expect, test } from "bun:test";
+import type { SQL } from "bun";
 import type { Lane } from "./job";
 import {
 	claim,
@@ -9,15 +9,9 @@ import {
 	secondsUntilNext,
 	settle,
 } from "./jobs";
-import { migrate } from "./migrate";
+import { useSchema } from "./testdb";
 
-const url = process.env.DATABASE_URL;
-if (!url) throw new Error("DATABASE_URL is required for the job queries");
-
-/** A throwaway schema, so the test kind added below never reaches the real enum. */
-const schema = `jobs_test_${process.pid}`;
-const admin = new SQL(url, { max: 1 });
-const sql = new SQL(url, { max: 2, connection: { search_path: schema } });
+const sql = useSchema("jobs");
 
 const lane: Lane = {
 	concurrency: 2,
@@ -31,18 +25,10 @@ const logged = { log: true };
 let userId: string;
 
 beforeAll(async () => {
-	await admin.unsafe(`CREATE SCHEMA ${schema}`);
-	await migrate(sql);
 	// An added enum value is usable only once the transaction that added it commits
 	await sql`ALTER TYPE job_kind ADD VALUE 'test'`;
 	[{ id: userId }] = await sql`
 		INSERT INTO users (provider, subject, email) VALUES ('google', 's', 'a@b.c') RETURNING id`;
-});
-
-afterAll(async () => {
-	await sql.close();
-	await admin.unsafe(`DROP SCHEMA ${schema} CASCADE`);
-	await admin.close();
 });
 
 beforeEach(async () => {

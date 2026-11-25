@@ -320,9 +320,9 @@ Agents only: files and sheets an agent is pointed at. There is no file browser
 
 ## Waitlist
 
-- [ ] Waitlist table holding the fields of the landing form, unique per email
-- [ ] Public RPC that adds a signup; it is the single call a client other than the engine makes
-      Contract only: `proto/api/v1/waitlist.proto` defines `WaitlistService.Join`; there is no handler, no table and no entry in the RPC table in `main.ts`
+- [x] Waitlist table holding the fields of the landing form, unique per email
+- [x] Public RPC that adds a signup; it is the single call a client other than the engine makes
+      No ceiling on the table, on purpose: signups do not expire, so a flood would close the list to real people for good. The rate-limit task below is the guard
 - [ ] Rate limiting on the public RPC as a pure function over request counts per client address and a fixed window passed in; tests at, below and over the limit
 
 ## Deployment and measurement

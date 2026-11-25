@@ -1,6 +1,5 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { create } from "@bufbuild/protobuf";
-import { SQL } from "bun";
 import {
 	finishSignIn,
 	getSession,
@@ -14,10 +13,10 @@ import {
 	GetSessionRequestSchema,
 	StartSignInRequestSchema,
 } from "./gen/api/v1/auth_pb";
-import { migrate } from "./migrate";
 import type { OidcConfig } from "./oidc";
 import { type Page, Refused } from "./rpc";
 import { hashToken, resolveSession } from "./session";
+import { useSchema } from "./testdb";
 
 const claimHash = hashToken("claim");
 
@@ -27,12 +26,7 @@ test("a web sign-in finishes only with the cookie of the browser that started it
 	expect(startedHere("web", claimHash, undefined)).toBe(false);
 });
 
-const url = process.env.DATABASE_URL;
-if (!url) throw new Error("DATABASE_URL is required for the sign-in queries");
-
-const schema = `auth_test_${process.pid}`;
-const admin = new SQL(url, { max: 1 });
-const sql = new SQL(url, { max: 2, connection: { search_path: schema } });
+const sql = useSchema("auth");
 const oidc: OidcConfig = {
 	redirectUri: "https://x/auth/callback",
 	clients: {
@@ -65,17 +59,6 @@ async function answered(claim: string, status: "signed_in" | "denied") {
 			handoff_hash = ${signedIn ? hashToken("handoff") : null}
 		WHERE claim_hash = ${hashToken(claim)}`;
 }
-
-beforeAll(async () => {
-	await admin.unsafe(`CREATE SCHEMA ${schema}`);
-	await migrate(sql);
-});
-
-afterAll(async () => {
-	await sql.close();
-	await admin.unsafe(`DROP SCHEMA ${schema} CASCADE`);
-	await admin.close();
-});
 
 test("a native client gets the claim, a web client gets it only as a cookie", async () => {
 	const app = await start(native(4100));

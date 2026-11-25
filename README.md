@@ -56,11 +56,12 @@ Needs [Bun](https://bun.sh), Rust with the `wasm32-unknown-unknown` target, [was
 
 ```sh
 bun install
+cp backend/.env.example backend/.env   # then fill in the Google sign-in client
 bun run gen            # TypeScript from the .proto files
 bun run wasm           # the engine as a WASM package
 docker compose up -d   # dev Postgres with pgvector
-bun run dev:backend    # needs PUBLIC_ORIGIN and the Google sign-in client id and secret (Microsoft's is optional), see docs/BACKEND.md
-bun run dev:desktop    # Tauri app
+bun run dev:backend    # reads backend/.env; Microsoft's client is optional, see docs/BACKEND.md
+bun run dev:desktop    # Tauri app; its Backend address defaults to http://localhost:5173, the dev server it starts, which proxies to the Backend
 bun run dev:web        # same UI, engine as WASM in a Worker
 bun run check          # lint, types, clippy, tests; the Backend's queue tests need the dev Postgres running
 ```

@@ -10,6 +10,7 @@ import {
 import { createExecutor } from "./executor";
 import { AuthService } from "./gen/api/v1/auth_pb";
 import { HealthService } from "./gen/api/v1/health_pb";
+import { WaitlistService } from "./gen/api/v1/waitlist_pb";
 import { check } from "./health";
 import { serve } from "./http";
 import { LANES } from "./lanes";
@@ -17,6 +18,7 @@ import { migrate } from "./migrate";
 import type { OidcConfig } from "./oidc";
 import { publicCookieRpc, publicRpc, userCookieRpc, userRpc } from "./rpc";
 import { resolveSession } from "./session";
+import { join } from "./waitlist";
 
 function requireEnv(name: string): string {
 	const value = process.env[name];
@@ -49,6 +51,7 @@ const table = new Map([
 	publicRpc(HealthService.method.check, () => check(sql)),
 	publicCookieRpc(AuthService.method.startSignIn, startSignIn(sql, oidc)),
 	publicRpc(AuthService.method.finishSignIn, finishSignIn(sql)),
+	publicRpc(WaitlistService.method.join, join(sql)),
 	userRpc(AuthService.method.getSession, getSession(sql)),
 	userCookieRpc(AuthService.method.signOut, signOut(sql)),
 ]);

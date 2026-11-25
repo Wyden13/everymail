@@ -10,7 +10,7 @@
 	"scripts": {
 		"gen": "bun run --filter '*' gen",
 		"wasm": "wasm-pack build engine --target web --out-dir pkg",
-		"dev:backend": "DATABASE_URL=postgres://postgres:everymail@localhost:5432/everymail bun run --cwd backend dev",
+		"dev:backend": "bun run --cwd backend dev",
 		"dev:site": "bun run --cwd site dev",
 		"dev:desktop": "tauri dev",
 		"dev:web": "bun run wasm && bun run --cwd frontend dev",

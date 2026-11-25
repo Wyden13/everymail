@@ -55,8 +55,11 @@ fn body(engine: &Engine, uri: &tauri::http::Uri) -> Response<Vec<u8>> {
 }
 
 fn main() {
+    // The default is the dev server `tauri dev` starts, not the Backend's own port: the sign-in page is
+    // served at the Backend's `PUBLIC_ORIGIN`, which in development is that server, and the sign-in
+    // listener takes the handoff only from a page of this URL's origin.
     let backend =
-        std::env::var("EVERYMAIL_BACKEND_URL").unwrap_or_else(|_| "http://127.0.0.1:8787".into());
+        std::env::var("EVERYMAIL_BACKEND_URL").unwrap_or_else(|_| "http://localhost:5173".into());
     tauri::Builder::default()
         .setup(move |app| {
             // The local database lives in the app's data directory and survives relaunch.
