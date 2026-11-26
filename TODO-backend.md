@@ -64,7 +64,8 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
       `ScheduledTime` (`time.proto`); `instant` (`time.ts`) converts it in Postgres and refuses a nonexistent date, time or zone with a 400; `enqueue` takes `due` as a delay or an instant. No call takes one yet: Snooze and Send are the first
 - [x] Durations are integer seconds, named with a `_seconds` suffix in protobuf and columns
       `bun run durations` (in `check`) bans `_ms`, `_millis`, `_minutes`, `_hours` and `_days` names in `proto/api` and `backend/migrations`
-- [ ] Recurrence rules stored with their zone; one pure next-run function for every schedule kind (every 15 minutes, every hour, daily at a time, weekdays at a time, custom); tests across DST changes
+- [x] Recurrence rules stored with their zone; one pure next-run function for every schedule kind (every 15 minutes, every hour, daily at a time, weekdays at a time, custom); tests across DST changes
+      `Schedule` (`time.proto`): every 15 minutes, every hour and custom are `interval_seconds`; daily and weekdays carry a `ClockTime` with its zone. `next` (`time.ts`) reads no clock and computes in Postgres; it is stored where its caller lands, the agent row or the schedule job's payload
 - [ ] Proactive interval minimum of 900 seconds, rejected on agent create and update, with seeded jitter in the next-run function; tests of the bound and the jitter range
 - [ ] Missed-run policy: after downtime a schedule runs once, not once per missed slot; test in the next-run function
 - [ ] Overlap policy: if the previous run is still going when the next is due, the next is skipped; test
