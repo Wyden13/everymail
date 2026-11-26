@@ -66,7 +66,8 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
       `bun run durations` (in `check`) bans `_ms`, `_millis`, `_minutes`, `_hours` and `_days` names in `proto/api` and `backend/migrations`
 - [x] Recurrence rules stored with their zone; one pure next-run function for every schedule kind (every 15 minutes, every hour, daily at a time, weekdays at a time, custom); tests across DST changes
       `Schedule` (`time.proto`): every 15 minutes, every hour and custom are `interval_seconds`; daily and weekdays carry a `ClockTime` with its zone. `next` (`time.ts`) reads no clock and computes in Postgres; it is stored where its caller lands, the agent row or the schedule job's payload
-- [ ] Proactive interval minimum of 900 seconds, rejected on agent create and update, with seeded jitter in the next-run function; tests of the bound and the jitter range
+- [x] Proactive interval minimum of 900 seconds, rejected on agent create and update, with seeded jitter in the next-run function; tests of the bound and the jitter range
+      `next` (`time.ts`) refuses an interval under `MIN_INTERVAL_SECONDS` with a 400, so `AgentService` create and update check a schedule by calling it; `jitterSeconds` is the seed's fixed delay
 - [ ] Missed-run policy: after downtime a schedule runs once, not once per missed slot; test in the next-run function
 - [ ] Overlap policy: if the previous run is still going when the next is due, the next is skipped; test
 - [ ] A job with a due time can be edited or cancelled until claimed, as one conditional update on status scheduled; test that an edit after the claim fails
@@ -235,7 +236,7 @@ Tests sit next to the logic they cover and only cover hard, deterministic logic:
       The agent filter is required and names one of the user's own agents, system agents included; `AgentService` rejects the trigger without it and rejects an agent naming itself; test both, and that the chain still stops at depth 3
 - [ ] Reactive trigger: approval resolved
 - [ ] Proactive trigger: the schedule job per agent, which first runs a code-only check for anything new since the agent's last run and ends without any LLM call if nothing is new; test of the check
-      The schedule is a fixed option or a custom interval in seconds; `AgentService` rejects an interval under 900, with a test
+      The schedule is a fixed option or a custom interval in seconds; `AgentService` rejects an interval under 900 by calling `next` (`time.ts`), with a test
 - [ ] An action set to Ask creates an approval item (agent, title, detail, reason such as "Send is set to Ask for new recipients") instead of acting
 - [ ] `ApprovalService` in `api.v1`: list, approve (performs the action), edit then approve, decline
 - [ ] Agent stats: handled this month, runs with no questions, waiting count, last run

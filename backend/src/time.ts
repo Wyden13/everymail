@@ -32,29 +32,55 @@ export async function instant(sql: SQL, time: ScheduledTime): Promise<Date> {
 	);
 }
 
-/** The first run of a schedule strictly after `after`. It reads no clock, so after downtime a caller passing
- * Postgres `now()` gets one run, not one per missed slot. A clock time is placed on each local day by the same
- * zone rules as `instant`, so a day whose time a daylight saving change skips or repeats still runs once. */
+/** The shortest interval a schedule may repeat at. */
+export const MIN_INTERVAL_SECONDS = 900;
+
+/** The longest delay jitter adds to a slot. */
+export const MAX_JITTER_SECONDS = 300;
+
+/** The fixed delay a seed adds after each of a schedule's slots: 10% of the interval, a clock time counting as
+ * a day, and at most `MAX_JITTER_SECONDS`. One owner always gets the same delay, so its runs stay the interval
+ * plus that delay apart and never come early, while owners that share a slot spread out. */
+export function jitterSeconds(schedule: Schedule, seed: string): number {
+	const { every } = schedule;
+	const interval = every.case === "intervalSeconds" ? every.value : 86_400;
+	const range = Math.min(Math.floor(interval / 10), MAX_JITTER_SECONDS);
+	return Number(Bun.hash(seed) % BigInt(range));
+}
+
+/** The first run of a schedule strictly after `after`: its slot plus the seed's jitter. It reads no clock, so
+ * after downtime a caller passing Postgres `now()` gets one run, not one per missed slot. A clock time is placed
+ * on each local day by the same zone rules as `instant`, so a day whose time a daylight saving change skips or
+ * repeats still runs once. An interval under `MIN_INTERVAL_SECONDS` is refused as a bad request, so agent
+ * create and update check a schedule by calling this. */
 export async function next(
 	sql: SQL,
 	schedule: Schedule,
 	after: Date,
+	seed: string,
 ): Promise<Date> {
 	const { every } = schedule;
 	if (!every.case) throw new Error("unset oneof in api.v1.Schedule");
-	if (every.case === "intervalSeconds")
+	const jitter = sql`make_interval(secs => ${jitterSeconds(schedule, seed)})`;
+	if (every.case === "intervalSeconds") {
+		if (every.value < MIN_INTERVAL_SECONDS)
+			throw new Refused(
+				400,
+				`an interval under ${MIN_INTERVAL_SECONDS} seconds: ${every.value}`,
+			);
 		return one(
 			sql,
-			sql`${after}::timestamptz + make_interval(secs => ${every.value})`,
+			sql`${after}::timestamptz + make_interval(secs => ${every.value}) + ${jitter}`,
 		);
+	}
 	const { hour, minute, zone } = every.value;
 	// Eight local days always hold the next slot, a weekday one included
 	return one(
 		sql,
 		sql`(SELECT min(t) FROM generate_series(0, 7) AS n,
 			LATERAL (SELECT (${after}::timestamptz AT TIME ZONE ${zone})::date + n AS d) AS day,
-			LATERAL make_timestamptz(extract(year FROM d)::int, extract(month FROM d)::int,
-				extract(day FROM d)::int, ${hour}, ${minute}, 0, ${zone}) AS t
+			LATERAL (SELECT make_timestamptz(extract(year FROM d)::int, extract(month FROM d)::int,
+				extract(day FROM d)::int, ${hour}, ${minute}, 0, ${zone}) + ${jitter} AS t) AS slot
 			WHERE t > ${after}::timestamptz
 				AND (${every.case === "daily"} OR extract(isodow FROM d) < 6))`,
 	);

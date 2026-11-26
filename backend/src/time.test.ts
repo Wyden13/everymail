@@ -4,7 +4,7 @@ import { ScheduledTimeSchema, ScheduleSchema } from "./gen/api/v1/time_pb";
 import { enqueue } from "./jobs";
 import { Refused } from "./rpc";
 import { useJobs } from "./testdb";
-import { instant, next } from "./time";
+import { instant, jitterSeconds, next } from "./time";
 
 const { sql, users } = useJobs("time");
 
@@ -114,8 +114,15 @@ const clock = (
 		every: { case: kind, value: { hour, minute, zone } },
 	});
 
-// Same New York changes as above; 6 March 2026 is a Friday
+// Same New York changes as above; 6 March 2026 is a Friday. Slots are listed without the seed's jitter
+const SEED = "agent-1";
 const runs: [string, ReturnType<typeof every>, string, string][] = [
+	[
+		"the shortest interval allowed",
+		every(900),
+		"2026-01-15T13:00:00Z",
+		"2026-01-15T13:15:00.000Z",
+	],
 	[
 		"every 15 minutes",
 		every(900),
@@ -141,21 +148,21 @@ const runs: [string, ReturnType<typeof every>, string, string][] = [
 		"2026-01-15T13:00:00.000Z",
 	],
 	[
-		"daily, at the slot itself, is the next day",
+		"daily, past the day's run, is the next day",
 		clock("daily", [8, 0], "America/New_York"),
-		"2026-01-15T13:00:00Z",
+		"2026-01-15T13:10:00Z",
 		"2026-01-16T13:00:00.000Z",
 	],
 	[
 		"daily, across spring forward, keeps the clock time",
 		clock("daily", [8, 0], "America/New_York"),
-		"2026-03-07T13:00:00Z",
+		"2026-03-07T13:10:00Z",
 		"2026-03-08T12:00:00.000Z",
 	],
 	[
 		"daily, across fall back, keeps the clock time",
 		clock("daily", [8, 0], "America/New_York"),
-		"2026-10-31T12:00:00Z",
+		"2026-10-31T12:10:00Z",
 		"2026-11-01T13:00:00.000Z",
 	],
 	[
@@ -177,9 +184,9 @@ const runs: [string, ReturnType<typeof every>, string, string][] = [
 		"2026-11-01T06:30:00.000Z",
 	],
 	[
-		"daily, after the overlap's run, the next day",
+		"daily, past the overlap's run, the next day",
 		clock("daily", [1, 30], "America/New_York"),
-		"2026-11-01T06:30:00Z",
+		"2026-11-01T06:40:00Z",
 		"2026-11-02T06:30:00.000Z",
 	],
 	[
@@ -218,7 +225,10 @@ test("a schedule's next run is its first slot after an instant", async () => {
 	for (const [name, schedule, after, utc] of runs)
 		expect([
 			name,
-			(await next(sql, schedule, new Date(after))).toISOString(),
+			new Date(
+				(await next(sql, schedule, new Date(after), SEED)).getTime() -
+					jitterSeconds(schedule, SEED) * 1000,
+			).toISOString(),
 		]).toEqual([name, utc]);
 });
 
@@ -226,13 +236,42 @@ test("a schedule with a time or zone that does not exist is refused as a bad req
 	for (const schedule of [
 		clock("daily", [8, 0], "Nowhere/Town"),
 		clock("weekdays", [9, 60], "UTC"),
+		every(899),
 	]) {
 		const error = await next(
 			sql,
 			schedule,
 			new Date("2026-01-15T12:00:00Z"),
+			SEED,
 		).catch((e: unknown) => e);
 		expect(error).toBeInstanceOf(Refused);
 		expect((error as Refused).status).toBe(400);
 	}
+});
+
+const seeds = Array.from({ length: 500 }, (_, i) => `agent-${i}`);
+
+test("jitter is fixed per seed and within 10% of the interval, at most 300 seconds", () => {
+	for (const [schedule, range] of [
+		[every(900), 90],
+		[every(3600), 300],
+		[clock("daily", [8, 0], "UTC"), 300],
+	] as const) {
+		const delays = seeds.map((seed) => jitterSeconds(schedule, seed));
+		for (const delay of delays) {
+			expect(delay).toBeGreaterThanOrEqual(0);
+			expect(delay).toBeLessThan(range);
+		}
+		expect(seeds.map((seed) => jitterSeconds(schedule, seed))).toEqual(delays);
+		expect(new Set(delays).size).toBeGreaterThan(1);
+	}
+});
+
+test("a time between a slot and its jitter still gets that slot's run", async () => {
+	const schedule = clock("daily", [8, 0], "UTC");
+	const seed = seeds.find((s) => jitterSeconds(schedule, s) > 1) ?? "";
+	const run = await next(sql, schedule, new Date("2026-01-15T08:00:01Z"), seed);
+	expect(run.getTime()).toBe(
+		Date.parse("2026-01-15T08:00:00Z") + jitterSeconds(schedule, seed) * 1000,
+	);
 });

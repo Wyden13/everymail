@@ -59,7 +59,7 @@ Everything the Backend does on its own is a job: fetching mail, sending mail, sn
 - Postgres converts wall time with its own time zone database, so the zone rules exist once. A wall time skipped by a daylight saving change moves forward by the gap; one that happens twice is the later. A date, time or zone that does not exist is refused as a bad request
 - A schedule is an interval in seconds (every 15 minutes, every hour and a custom interval are all one), or a clock time in a zone each day or on weekdays, Monday to Friday in that zone. Its next run is the first slot after a given instant, computed by Postgres with the same zone rules, so a day whose clock time a daylight saving change skips or repeats runs once
 - Durations are integer seconds, named with a `_seconds` suffix in protobuf and columns. A constant in code may use a larger unit, such as retention's days
-- A proactive wakeup has a minimum interval of 900 seconds (15 minutes), with jitter
+- A proactive wakeup has a minimum interval of 900 seconds (15 minutes); a shorter one is refused. Jitter is a fixed delay per agent, seeded by its id, added after each slot and never before: 10% of the interval, a clock time counting as a day, at most 300 seconds
 - After downtime a missed schedule runs once, not once per missed slot. If the previous run is still going when the next is due, the next is skipped
 - A scheduled send, undo send (a 10 second delay on "send now") and snooze are the same thing: a job with a due time that can be edited or cancelled until it is claimed
 
